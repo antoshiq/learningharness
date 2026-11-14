@@ -4,7 +4,7 @@ import type { NextConfig } from "next";
 const allowedDevOrigins = (process.env.TUTOR_ALLOWED_ORIGINS ?? "").split(",").filter(Boolean);
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["better-sqlite3"],
+  serverExternalPackages: ["better-sqlite3", "@anthropic-ai/claude-agent-sdk"],
   allowedDevOrigins,
   devIndicators: false,
   turbopack: {

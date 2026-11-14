@@ -9,11 +9,13 @@ const PROVIDER_LABEL: Record<Exclude<ProviderId, "mock">, string> = {
   anthropic: "Claude (Anthropic)",
   openrouter: "OpenRouter",
   custom: "Свой сервер",
+  "claude-code": "Подписка Claude",
 };
 const SUGGEST: Record<string, string[]> = {
   anthropic: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-2"],
   openrouter: [],
   custom: [],
+  "claude-code": ["opus", "sonnet", "haiku"],
 };
 
 function KeyField({ label, saved, hint, onSave }: { label: string; saved: boolean; hint: string; onSave: (v: string) => Promise<void> }) {
@@ -114,7 +116,7 @@ function RoleEditor({
           value={model}
           onChange={(e) => setModel(e.target.value)}
           list={`models-${name}`}
-          placeholder={provider === "openrouter" ? "например anthropic/claude-sonnet-5.5" : "идентификатор модели"}
+          placeholder={provider === "openrouter" ? "например anthropic/claude-sonnet-5.5" : provider === "claude-code" ? "opus, sonnet или haiku" : "идентификатор модели"}
           spellCheck={false}
           autoCapitalize="off"
           autoCorrect="off"
@@ -236,6 +238,26 @@ export default function SettingsPage() {
                 </Button>
               </div>
               <KeyField label="Ключ для своего сервера (если нужен)" saved={cfg.has.customKey} hint="необязательно" onSave={(v) => put({ keys: { custom: v } })} />
+            </Card>
+
+            <Card className="space-y-3">
+              <h2 className="text-lg font-semibold">Подписка Claude</h2>
+              <p className="text-sm text-muted">
+                Можно учиться на подписке Claude (Pro или Max) без API-ключа. Приложение запускает программу Claude Code, установленную на этом компьютере, под твоим
+                входом. Ключ или пароль от аккаунта приложению не нужны и нигде в нём не хранятся.
+              </p>
+              <ol className="list-decimal space-y-1 pl-5 text-sm text-muted">
+                <li>
+                  Открой терминал, запусти <code className="font-mono text-[13px]">claude</code> и войди командой <code className="font-mono text-[13px]">/login</code>, если ещё не
+                  входил.
+                </li>
+                <li>Ниже, в «Моделях», выбери «Подписка Claude» и модель: opus, sonnet или haiku.</li>
+                <li>Нажми «Сохранить», затем «Проверить».</li>
+              </ol>
+              <p className="text-sm text-muted">
+                Лимиты общие с Claude Code и claude.ai: уроки расходуют ту же квоту. Стоимость в приложении для подписки не показывается, только токены. Этот способ
+                рассчитан на личное использование: раздавать приложение другим с входом через подписку правила Anthropic не разрешают.
+              </p>
             </Card>
 
             <Card className="space-y-6">

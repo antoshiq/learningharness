@@ -84,7 +84,7 @@ export function getConfig(): AppConfig {
   };
 }
 
-const PROVIDERS: ProviderId[] = ["anthropic", "openrouter", "custom"];
+const PROVIDERS: ProviderId[] = ["anthropic", "openrouter", "custom", "claude-code"];
 
 export function updateConfig(patch: {
   roles?: Partial<AppConfig["roles"]>;

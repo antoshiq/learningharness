@@ -4,6 +4,7 @@
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "../db";
 import type { Db } from "../db";
+import { getRoles } from "../config";
 import { chatAs } from "../llm";
 import { isToolUse, type Block, type ChatMsg, type ToolResultBlock } from "../llm/types";
 import { applyAttempt } from "../mastery";
@@ -12,6 +13,7 @@ import type { AnswerPayload, Outcome, Question, StreamEvent, TurnInput } from "@
 import { systemPrompt } from "./prompts";
 import { initialState, planStateText, STATE_PREFIX, SYSTEM_PREFIX } from "./state";
 import { executeTool, toolDefs } from "./tools";
+import { runClaudeCodeTurn } from "./claude-code";
 import type { PendingState } from "../db/schema";
 
 const MAX_STEPS = 40;
@@ -181,6 +183,13 @@ export async function runTurn(sessionId: number, input: TurnInput, emit: (e: Str
   running.add(sessionId);
   try {
     appendInput(db, sessionId, input, emit);
+
+    // On a Claude subscription the model side runs inside Claude Code, which
+    // owns the tool loop; it mirrors everything back into the same history.
+    if (getRoles().strong.provider === "claude-code") {
+      await runClaudeCodeTurn(sessionId, emit);
+      return;
+    }
 
     for (let step = 0; step < MAX_STEPS; step++) {
       const { session, topic } = loadSession(db, sessionId);

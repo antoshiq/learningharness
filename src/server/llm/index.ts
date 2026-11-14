@@ -1,5 +1,6 @@
 import { apiKey, getCustomBaseUrl, getRoles, roleProblem } from "../config";
 import { getDb, schema } from "../db";
+import { claudeCodeProvider } from "../agent/claude-code";
 import { anthropicProvider } from "./anthropic";
 import { mockProvider } from "./mock";
 import { openAiProvider } from "./openai";
@@ -19,6 +20,8 @@ export function providerFor(id: ProviderId): LlmProvider {
       });
     case "custom":
       return openAiProvider({ id: "custom", baseUrl: getCustomBaseUrl(), apiKey: apiKey("custom") });
+    case "claude-code":
+      return claudeCodeProvider();
     case "mock":
       return mockProvider();
   }

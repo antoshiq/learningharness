@@ -45,6 +45,8 @@ export const sessions = sqliteTable("sessions", {
   plannedMinutes: integer("planned_minutes"),
   messages: text("messages", { mode: "json" }).$type<ChatMsg[]>().notNull(),
   pending: text("pending", { mode: "json" }).$type<PendingState | null>(),
+  /** Claude Code session that holds this lesson's context, and how many of our messages it has seen. */
+  cc: text("cc", { mode: "json" }).$type<{ sessionId: string; sent: number } | null>(),
   summary: text("summary", { mode: "json" }).$type<SessionSummary | null>(),
   startedAt: integer("started_at").notNull(),
   endedAt: integer("ended_at"),

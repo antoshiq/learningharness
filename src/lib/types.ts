@@ -140,7 +140,7 @@ export interface UsageTotals {
   costKnown: boolean;
 }
 
-export type ProviderId = "anthropic" | "openrouter" | "custom" | "mock";
+export type ProviderId = "anthropic" | "openrouter" | "custom" | "claude-code" | "mock";
 export interface RoleConfig {
   provider: ProviderId;
   model: string;

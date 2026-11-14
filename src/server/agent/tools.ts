@@ -111,35 +111,48 @@ const SearchCode = z.object({
   regex: z.boolean().optional().describe("true — query это регулярное выражение; иначе точный текст"),
 });
 
-const def = (name: string, description: string, s: z.ZodType): ToolDef => {
-  const schemaJson = z.toJSONSchema(s) as Record<string, unknown>;
-  delete schemaJson.$schema;
-  return { name, description, schema: schemaJson };
-};
+interface Spec {
+  name: string;
+  description: string;
+  schema: z.ZodObject;
+  repoOnly?: boolean;
+}
 
-export function toolDefs(topicKind: "topic" | "repo"): ToolDef[] {
-  const base = [
-    def(
-      "ask_question",
+const SPECS: Spec[] = [
+  {
+    name: "ask_question",
+    description:
       "Показать ученику один вопрос и дождаться ответа. Единственный способ задать вопрос. После вызова ход останавливается; ответ ученика придёт как результат этого инструмента.",
-      AskQuestion,
-    ),
-    def(
-      "grade_answer",
+    schema: AskQuestion,
+  },
+  {
+    name: "grade_answer",
+    description:
       "Оценить ответ ученика. Обязателен для free и math. Для авто-проверенных вопросов используй, чтобы записать заблуждение (outcome при этом не меняется).",
-      GradeAnswer,
-    ),
-    def("set_plan", "Создать или перестроить план обучения — граф узлов с зависимостями. Передавай план целиком.", SetPlan),
-    def("end_session", "Завершить сессию и показать ученику итог.", EndSession),
-  ];
-  if (topicKind !== "repo") return base;
-  return [
-    ...base,
-    def("list_dir", "Показать содержимое папки репозитория.", ListDir),
-    def("read_file", "Прочитать файл репозитория с номерами строк.", ReadFile),
-    def("search_code", "Найти текст в файлах репозитория.", SearchCode),
-    def("save_repo_map", "Сохранить обзор проекта после анализа. Вызывается один раз, до диагностики.", SaveRepoMap),
-  ];
+    schema: GradeAnswer,
+  },
+  { name: "set_plan", description: "Создать или перестроить план обучения — граф узлов с зависимостями. Передавай план целиком.", schema: SetPlan },
+  { name: "end_session", description: "Завершить сессию и показать ученику итог.", schema: EndSession },
+  { name: "list_dir", description: "Показать содержимое папки репозитория.", schema: ListDir, repoOnly: true },
+  { name: "read_file", description: "Прочитать файл репозитория с номерами строк.", schema: ReadFile, repoOnly: true },
+  { name: "search_code", description: "Найти текст в файлах репозитория.", schema: SearchCode, repoOnly: true },
+  { name: "save_repo_map", description: "Сохранить обзор проекта после анализа. Вызывается один раз, до диагностики.", schema: SaveRepoMap, repoOnly: true },
+];
+
+const specsFor = (topicKind: "topic" | "repo") => SPECS.filter((s) => !s.repoOnly || topicKind === "repo");
+
+/** Tool definitions as JSON Schema, for the Messages and chat-completions APIs. */
+export function toolDefs(topicKind: "topic" | "repo"): ToolDef[] {
+  return specsFor(topicKind).map((s) => {
+    const schemaJson = z.toJSONSchema(s.schema) as Record<string, unknown>;
+    delete schemaJson.$schema;
+    return { name: s.name, description: s.description, schema: schemaJson };
+  });
+}
+
+/** The same tools as Zod shapes, for the Claude Agent SDK. Cross-field rules are re-checked in executeTool. */
+export function toolShapes(topicKind: "topic" | "repo"): { name: string; description: string; shape: z.ZodRawShape }[] {
+  return specsFor(topicKind).map((s) => ({ name: s.name, description: s.description, shape: s.schema.shape }));
 }
 
 function parse<T>(s: z.ZodType<T>, input: unknown): { ok: true; data: T } | { ok: false; error: string } {
