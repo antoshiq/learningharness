@@ -1,0 +1,104 @@
+// Scripted provider for offline tests (TUTOR_MOCK=1). It walks a fixed lesson
+// so the whole turn loop can be exercised without a real model or API key.
+import { isText, isToolResult, type Block, type LlmProvider, type LlmRequest, type LlmResult } from "./types";
+
+let seq = 0;
+const call = (name: string, input: unknown): Block => ({ type: "tool_use", id: `mock_${Date.now()}_${seq++}`, name, input });
+
+export function mockProvider(): LlmProvider {
+  return {
+    id: "mock",
+    async listModels() {
+      return ["mock"];
+    },
+    async chat(req: LlmRequest): Promise<LlmResult> {
+      const say = (t: string): Block => {
+        req.onText?.(t);
+        return { type: "text", text: t };
+      };
+      const done = (content: Block[]): LlmResult => ({
+        content,
+        stopReason: content.some((b) => b.type === "tool_use") ? "tool_use" : "end",
+        usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 },
+      });
+      if (!req.tools?.length) return done([say("(тест) Короткий ответ на боковой вопрос.")]);
+
+      const last = req.messages[req.messages.length - 1];
+      const lastText = last.content.filter(isText).map((b) => b.text).join("\n");
+      const results = last.content.filter(isToolResult);
+      const failed = results.find((r) => r.is_error);
+      if (failed) return done([say(`(тест) Инструмент вернул ошибку: ${failed.content}`)]);
+      if (lastText.includes("завершает сессию")) {
+        return done([call("end_session", { learned: ["сложение"], weak: [], next: "функции" })]);
+      }
+      const step = req.messages.filter((m) => m.role === "assistant").length;
+      const attemptId = Number(/attempt_id: (\d+)/.exec(results.map((r) => r.content).join("\n"))?.[1] ?? 0);
+
+      switch (step) {
+        case 0:
+          return done([
+            say("(тест) Сначала проверю, что ты уже знаешь."),
+            call("ask_question", {
+              purpose: "probe",
+              kind: "choice",
+              prompt: "Чему равно $2 + 2$?",
+              options: ["3", "4", "5"],
+              correct_option: 1,
+              explanation: "Сложение.",
+            }),
+          ]);
+        case 1:
+          return done([
+            call("set_plan", {
+              nodes: [
+                { key: "sum", title: "Сложение", summary: "Складывать числа" },
+                { key: "func", title: "Функции", deps: ["sum"] },
+                { key: "why", title: "Зачем функции", deps: ["func"] },
+              ],
+            }),
+          ]);
+        case 2:
+          return done([
+            say("(тест) План готов. Начнём со сложения."),
+            call("ask_question", {
+              node_key: "sum",
+              purpose: "check",
+              kind: "predict_output",
+              language: "python",
+              prompt: "Что напечатает программа?",
+              code: "print(1 + 1)",
+              hints: ["Это сложение", "1 + 1"],
+            }),
+          ]);
+        case 3:
+          return done([
+            say("(тест) Теперь функция."),
+            call("ask_question", {
+              node_key: "func",
+              purpose: "check",
+              kind: "code",
+              language: "python",
+              prompt: "Напиши функцию `add(a, b)`.",
+              code: "def add(a, b):\n    pass\n",
+              solution: "def add(a, b):\n    return a + b\n",
+              tests: "assert add(1, 2) == 3, 'add(1, 2) должно быть 3'",
+            }),
+          ]);
+        case 4:
+          return done([
+            call("ask_question", {
+              node_key: "why",
+              purpose: "check",
+              kind: "free",
+              prompt: "Зачем нужны функции?",
+              reference_answer: "Переиспользование кода",
+            }),
+          ]);
+        case 5:
+          return done([call("grade_answer", { attempt_id: attemptId, outcome: "correct" })]);
+        default:
+          return done([call("end_session", { learned: ["сложение", "функции"], weak: [], next: "циклы" })]);
+      }
+    },
+  };
+}
