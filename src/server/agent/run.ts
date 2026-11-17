@@ -22,6 +22,7 @@ const running = (g.__tutorRunning ??= new Set());
 const invalidStreak = (g.__tutorInvalid ??= new Map());
 
 export const isRunning = (sessionId: number) => running.has(sessionId);
+export const anyRunning = () => running.size > 0;
 
 export class TurnError extends Error {
   constructor(

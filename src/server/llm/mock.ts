@@ -21,7 +21,44 @@ export function mockProvider(): LlmProvider {
         stopReason: content.some((b) => b.type === "tool_use") ? "tool_use" : "end",
         usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 },
       });
-      if (!req.tools?.length) return done([say("(тест) Короткий ответ на боковой вопрос.")]);
+      if (!req.tools?.length) {
+        // Quick overview: pick files, write the overview, open a thesis.
+        if (req.system.startsWith("Ты помогаешь разобраться в проекте")) return done([say('["README.md"]')]);
+        if (req.system.startsWith("Ты составляешь краткий экскурс")) {
+          return done([
+            say(
+              "## Суть\n(тест) Сложение объединяет числа в одно.\n\n## Главное\n1. **Переместительность** — от перестановки слагаемых сумма не меняется.\n2. **Ноль** — прибавление нуля не меняет число.\n\n## Как это работает\n```mermaid\nflowchart LR\n  A[\"Слагаемые\"] --> B[\"Сумма\"]\n```\n\n## Пример\n```python\nprint(2 + 2)\n```",
+            ),
+          ]);
+        }
+        if (req.system.startsWith("Ты делаешь карточки") || req.system.startsWith("Ты составляешь экзамен")) {
+          const node = /(\w+) — Сложение/.exec(req.messages.map((m) => m.content.filter(isText).map((b) => b.text).join("")).join(""))?.[1];
+          return done([
+            say(
+              JSON.stringify([
+                { kind: "choice", prompt: "(тест) Чему равно $3 + 4$?", options: ["6", "7", "8"], correct_option: 1, explanation: "Сложение.", ...(node ? { node_key: node } : {}) },
+                { kind: "free", prompt: "(тест) Что такое сумма?", reference_answer: "Результат сложения.", explanation: "Определение." },
+                { kind: "choice", prompt: "без вариантов" },
+              ]),
+            ),
+          ]);
+        }
+        if (req.system.startsWith("Ты проверяешь объяснение")) {
+          const followUp = req.messages.some((m) => m.content.some((b) => isText(b) && b.text.includes("Ответ ученика на уточняющий вопрос")));
+          return done([
+            say(
+              JSON.stringify(
+                followUp
+                  ? { score: 90, verdict: "correct", good: ["(тест) Теперь всё верно"], gaps: [], errors: [], followup: "", model: "(тест) Образец." }
+                  : { score: 55, verdict: "partial", good: ["(тест) Суть верна"], gaps: ["(тест) Не сказано про ноль"], errors: [], followup: "(тест) Что будет, если прибавить ноль?", model: "(тест) Образец." },
+              ),
+            ),
+          ]);
+        }
+        if (req.system.startsWith("Ты отвечаешь на вопросы о проекте")) return done([say("(тест) Точка входа — `README.md:1`.")]);
+        if (req.system.startsWith("Ученик читает краткий экскурс")) return done([say("(тест) Подробнее: $a + b = b + a$ для любых чисел.")]);
+        return done([say("(тест) Короткий ответ на боковой вопрос.")]);
+      }
 
       const last = req.messages[req.messages.length - 1];
       const lastText = last.content.filter(isText).map((b) => b.text).join("\n");

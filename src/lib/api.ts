@@ -82,3 +82,17 @@ export function formatDue(ms: number | null, now = Date.now()): string {
   if (days === 1) return "завтра";
   return `через ${days} дн.`;
 }
+
+/** "сегодня" / "вчера" / "5 дн. назад" for the last activity on a topic. */
+export function formatAgo(ms: number, now = Date.now()): string {
+  const days = Math.floor((now - ms) / 86_400_000);
+  if (days <= 0) return "сегодня";
+  if (days === 1) return "вчера";
+  if (days < 30) return `${days} дн. назад`;
+  return new Date(ms).toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: "numeric" });
+}
+
+/** "сегодня" / "завтра" / "через 5 дней" for a date ahead. */
+export function daysWord(n: number): string {
+  return n <= 0 ? "сегодня" : n === 1 ? "завтра" : `через ${n} ${plural(n, "день", "дня", "дней")}`;
+}

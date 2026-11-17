@@ -2,54 +2,118 @@
 @import "katex/dist/katex.min.css";
 @import "@xyflow/react/dist/style.css";
 
+/*
+ * Visual language: a code editor (VS Code "Modern" themes).
+ * --chrome is the window backdrop that shows in the gaps between blocks and
+ * under the status bar, --bg is the editor area, --surface is panels (side
+ * bar, tabs, widgets), --input is form fields.
+ */
 :root {
-  --bg: #f7f6f3;
-  --surface: #ffffff;
-  --surface-2: #f0eee9;
-  --border: #dedad2;
-  --text: #1d1c1a;
-  --muted: #6b675f;
-  --accent: #2f5fd0;
+  --chrome: #e2e3e6;
+  --bg: #ffffff;
+  --surface: #f8f8f8;
+  --surface-2: #ececec;
+  --input: #ffffff;
+  --border: #e5e5e5;
+  --border-strong: #cecece;
+  --text: #3b3b3b;
+  --bright: #1f1f1f;
+  --muted: #666666;
+  --accent: #005fb8;
+  --accent-strong: #005fb8;
+  --accent-hover: #0258a8;
   --accent-fg: #ffffff;
-  --accent-soft: #e6edfb;
-  --ok: #1f7a4d;
-  --ok-soft: #e2f3ea;
-  --bad: #b3372f;
-  --bad-soft: #fbe9e7;
-  --warn: #96630a;
-  --warn-soft: #fbf1d9;
-  --code-bg: #f1efe9;
+  --accent-soft: #e4effa;
+  --ok: #2e7d32;
+  --ok-soft: #e3f3e4;
+  --bad: #c72e2e;
+  --bad-soft: #fbe7e7;
+  --warn: #8a6100;
+  --warn-soft: #fbf1cf;
+  --code-bg: #f2f2f2;
+  --widget-shadow: 0 0 8px 2px rgb(0 0 0 / 0.16);
+  --focus-shadow: 0 0 0 1px var(--accent);
 }
 
+/* Dark: by the system setting unless the learner picked light, or when picked explicitly. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #141413;
-    --surface: #1e1e1c;
-    --surface-2: #282826;
-    --border: #3a3936;
-    --text: #ecebe7;
-    --muted: #a09c93;
-    --accent: #7ea2f5;
-    --accent-fg: #10131c;
-    --accent-soft: #212b44;
-    --ok: #5cc08c;
-    --ok-soft: #17301f;
-    --bad: #ef8a80;
-    --bad-soft: #3a1c19;
-    --warn: #e0b057;
-    --warn-soft: #33290f;
-    --code-bg: #262624;
+  :root:not([data-theme="light"]) {
+    --chrome: #0c0d0f;
+    --bg: #121314;
+    --surface: #191a1c;
+    --surface-2: #2a2b2e;
+    --input: #1f2023;
+    --border: #242528;
+    --border-strong: #3a3b3f;
+    --text: #cdced1;
+    --bright: #f2f3f5;
+    --muted: #8e9095;
+    --accent: #4daafc;
+    --accent-strong: #0078d4;
+    --accent-hover: #026ec1;
+    --accent-fg: #ffffff;
+    --accent-soft: #04395e;
+    --ok: #73c991;
+    --ok-soft: #1b3324;
+    --bad: #f14c4c;
+    --bad-soft: #3c1f1f;
+    --warn: #cca700;
+    --warn-soft: #352d08;
+    --code-bg: #26272a;
+    --widget-shadow: 0 0 8px 2px rgb(0 0 0 / 0.36);
   }
+}
+:root[data-theme="dark"] {
+  --chrome: #0c0d0f;
+  --bg: #121314;
+  --surface: #191a1c;
+  --surface-2: #2a2b2e;
+  --input: #1f2023;
+  --border: #242528;
+  --border-strong: #3a3b3f;
+  --text: #cdced1;
+  --bright: #f2f3f5;
+  --muted: #8e9095;
+  --accent: #4daafc;
+  --accent-strong: #0078d4;
+  --accent-hover: #026ec1;
+  --accent-fg: #ffffff;
+  --accent-soft: #04395e;
+  --ok: #73c991;
+  --ok-soft: #1b3324;
+  --bad: #f14c4c;
+  --bad-soft: #3c1f1f;
+  --warn: #cca700;
+  --warn-soft: #352d08;
+  --code-bg: #26272a;
+  --widget-shadow: 0 0 8px 2px rgb(0 0 0 / 0.36);
+}
+:root {
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 @theme inline {
+  --color-chrome: var(--chrome);
   --color-bg: var(--bg);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
+  --color-input: var(--input);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-text: var(--text);
+  --color-bright: var(--bright);
   --color-muted: var(--muted);
   --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-hover: var(--accent-hover);
   --color-accent-fg: var(--accent-fg);
   --color-accent-soft: var(--accent-soft);
   --color-ok: var(--ok);
@@ -59,27 +123,53 @@
   --color-warn: var(--warn);
   --color-warn-soft: var(--warn-soft);
   --color-code: var(--code-bg);
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, "Cascadia Code", Consolas, "SF Mono", Menlo, monospace;
+  --font-sans: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: "JetBrains Mono Variable", "Cascadia Code", Consolas, ui-monospace, Menlo, monospace;
+  --shadow-widget: var(--widget-shadow);
+  --radius-md: 4px;
+  --radius-lg: 8px;
 }
 
 html {
   -webkit-text-size-adjust: 100%;
 }
 
+/* The window backdrop is near-black; panels float on it as separate rounded blocks. */
 body {
-  background: var(--bg);
+  background: var(--chrome);
   color: var(--text);
   font-family: var(--font-sans);
-  line-height: 1.55;
+  font-size: 14px;
+  line-height: 1.5;
   overflow-x: hidden;
 }
 
-/* 16px inputs: iOS zooms the page when a smaller field gets focus. */
+::selection {
+  background: color-mix(in srgb, var(--accent-strong) 40%, transparent);
+}
+
+/* Editor-style scrollbars. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
+}
+
+/* 16px inputs on phones: iOS zooms the page when a smaller field gets focus. */
 input,
 textarea,
 select {
   font-size: 16px;
+}
+@media (min-width: 640px) {
+  input,
+  textarea,
+  select {
+    font-size: 13px;
+  }
+}
+
+input[type="checkbox"] {
+  accent-color: var(--accent-strong);
 }
 
 button {
@@ -91,11 +181,30 @@ button:disabled {
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
 }
 
-/* ---- Rendered Markdown ---- */
+/* ---- Lesson text ---- */
+.prose-lesson {
+  font-size: 15px;
+  line-height: 1.65;
+  max-width: 76ch;
+}
+
+/* A quick overview: sections stand apart, theses read as a dense list. */
+.md.brief h2 {
+  font-size: 1.08em;
+  color: var(--accent);
+  margin-top: 1.5em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--border);
+}
+.md.brief li + li {
+  margin-top: 0.4em;
+}
+
+/* ---- Rendered Markdown (close to the editor's Markdown preview) ---- */
 .md {
   overflow-wrap: anywhere;
 }
@@ -106,23 +215,29 @@ button:disabled {
 .md h2,
 .md h3,
 .md h4 {
-  font-weight: 650;
-  line-height: 1.3;
-  margin-top: 1.1em;
+  color: var(--bright);
+  font-weight: 600;
+  line-height: 1.25;
+  margin-top: 1.4em;
+}
+.md > :first-child {
+  margin-top: 0;
 }
 .md h1 {
-  font-size: 1.3em;
+  font-size: 1.5em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border);
 }
 .md h2 {
-  font-size: 1.18em;
+  font-size: 1.25em;
 }
 .md h3,
 .md h4 {
-  font-size: 1.05em;
+  font-size: 1.08em;
 }
 .md ul,
 .md ol {
-  padding-left: 1.4em;
+  padding-left: 1.6em;
 }
 .md ul {
   list-style: disc;
@@ -133,34 +248,42 @@ button:disabled {
 .md li + li {
   margin-top: 0.25em;
 }
+.md strong {
+  color: var(--bright);
+  font-weight: 600;
+}
 .md a {
   color: var(--accent);
+}
+.md a:hover {
   text-decoration: underline;
 }
 .md blockquote {
-  border-left: 3px solid var(--border);
-  padding-left: 0.9em;
+  border-left: 4px solid var(--border-strong);
+  background: var(--surface);
+  padding: 0.3em 0.9em;
   color: var(--muted);
 }
 .md code {
   font-family: var(--font-mono);
-  font-size: 0.9em;
+  font-size: 0.88em;
   background: var(--code-bg);
   padding: 0.1em 0.35em;
-  border-radius: 4px;
+  border-radius: 3px;
 }
 .md pre {
-  background: var(--code-bg);
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.75em 0.9em;
+  border-radius: 4px;
+  padding: 0.8em 1em;
   overflow-x: auto;
-  line-height: 1.45;
+  line-height: 1.5;
+  font-size: 13px;
 }
 .md pre code {
   background: none;
   padding: 0;
-  font-size: 0.86em;
+  font-size: inherit;
   overflow-wrap: normal;
   white-space: pre;
 }
@@ -172,12 +295,13 @@ button:disabled {
 }
 .md th,
 .md td {
-  border: 1px solid var(--border);
-  padding: 0.35em 0.6em;
+  border: 1px solid var(--border-strong);
+  padding: 0.35em 0.7em;
   text-align: left;
 }
 .md th {
-  background: var(--surface-2);
+  background: var(--surface);
+  font-weight: 600;
 }
 .md hr {
   border-color: var(--border);
@@ -190,11 +314,14 @@ button:disabled {
 
 /* ---- Code editor ---- */
 .cm-editor {
-  font-size: 14px;
-  border-radius: 8px;
+  font-size: 13px;
 }
 .cm-editor .cm-scroller {
   font-family: var(--font-mono);
+  line-height: 1.55;
+}
+.cm-editor.cm-focused {
+  outline: none !important;
 }
 @media (max-width: 640px) {
   .cm-editor .cm-content {
@@ -205,18 +332,119 @@ button:disabled {
 /* ---- Plan graph ---- */
 .react-flow {
   --xy-background-color: transparent;
-  --xy-edge-stroke: var(--muted);
-  --xy-node-border-radius: 8px;
+  --xy-edge-stroke: var(--border-strong);
+  --xy-edge-stroke-width: 1.5;
+  --xy-node-border-radius: 3px;
 }
 .react-flow__attribution {
   display: none;
 }
 .react-flow__node {
   font-family: var(--font-sans);
+  cursor: pointer;
+}
+/* Nodes are not connectable, so hide handles. */
+.react-flow__handle {
+  opacity: 0;
+  pointer-events: none;
+}
+.react-flow__controls {
+  box-shadow: none;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.react-flow__controls-button {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  fill: var(--text);
+  width: 30px;
+  height: 30px;
+}
+.react-flow__controls-button:hover {
+  background: var(--surface-2);
 }
 
 .safe-bottom {
   padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+/* A plan node that is being learned: half-done, like a modified file. */
+.cell-learning {
+  background: repeating-linear-gradient(135deg, var(--warn) 0 1.5px, var(--warn-soft) 1.5px 4px);
+}
+
+/* Activity calendar: one hue, light to dark (on dark themes, dim to bright). */
+.heat-0 {
+  background: var(--surface-2);
+}
+.heat-1 {
+  background: color-mix(in srgb, var(--ok) 30%, var(--surface-2));
+}
+.heat-2 {
+  background: color-mix(in srgb, var(--ok) 52%, var(--surface-2));
+}
+.heat-3 {
+  background: color-mix(in srgb, var(--ok) 76%, var(--surface-2));
+}
+.heat-4 {
+  background: var(--ok);
+}
+
+@keyframes widget-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.sheet-in {
+  animation: widget-in 0.12s ease-out both;
+}
+/* On phones the sheet is anchored to the bottom edge, so it rises from there. */
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+@media (max-width: 639.98px) {
+  .sheet-in.sheet-bottom {
+    animation: sheet-up 0.24s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .sheet-out.sheet-bottom {
+    animation: sheet-up 0.16s ease-in reverse both;
+  }
+}
+/* Closing: the same movement played backwards, a little faster. */
+.sheet-out {
+  animation: widget-in 0.1s ease-in reverse both;
+  pointer-events: none;
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.fade-in {
+  animation: fade-in 0.12s ease-out both;
+}
+.fade-out {
+  animation: fade-in 0.12s ease-in reverse both;
+  pointer-events: none;
+}
+/* Text that only fades, for content that replaces something already on screen. */
+.appear {
+  animation: fade-in 0.2s ease-out both;
 }
 
 @keyframes pulse-dot {
@@ -231,31 +459,193 @@ button:disabled {
 .dot {
   animation: pulse-dot 1.2s infinite;
 }
-@media (prefers-reduced-motion: reduce) {
-  .dot {
-    animation: none;
+
+/* The thin running bar the editor shows under a title while it works. */
+@keyframes progress-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(400%);
   }
 }
+.progress-bar {
+  animation: progress-slide 1.6s linear infinite;
+}
 
-/* Plan graph chrome follows the theme; nodes are not connectable, so hide handles. */
-.react-flow__handle {
-  opacity: 0;
-  pointer-events: none;
+/* ---- Motion ----
+ * Short and functional, like the editor's own: things rise into place when
+ * they appear, results pop once, and layout changes glide instead of jumping.
+ */
+
+/* Content appearing: a page, a tab, a question, a list row. Stagger with --i. */
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
-.react-flow__controls {
-  box-shadow: none;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+.enter {
+  animation: enter 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: calc(var(--i, 0) * 35ms);
+}
+
+/* A graded answer: the result badge lands with a small overshoot. */
+@keyframes pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.pop {
+  animation: pop 0.34s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+/* Progress squares fill in one after another. */
+@keyframes cell-in {
+  from {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.cell-in {
+  animation: cell-in 0.22s ease-out both;
+  animation-delay: calc(var(--i, 0) * 22ms + 80ms);
+}
+
+/* Bars (calibration, long plans) grow from the left. */
+@keyframes grow-x {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.grow-x {
+  transform-origin: left;
+  animation: grow-x 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* Chart columns grow up from the baseline. */
+@keyframes grow-y {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+.grow-y {
+  transform-origin: bottom;
+  animation: grow-y 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* Text being written by the tutor ends with a blinking cursor. */
+@keyframes caret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+.streaming > :last-child::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 1.05em;
+  margin-left: 3px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: caret 1s steps(1) infinite;
+}
+
+/* The open question pulses once so the eye finds it. */
+@keyframes focus-ring {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 10px transparent;
+  }
+}
+.attention {
+  animation:
+    enter 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both,
+    focus-ring 0.9s ease-out 0.2s 1;
+}
+
+/* Collapsible side bar sections: height is animated through a grid row. */
+.fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.18s ease;
+}
+.fold[data-open="true"] {
+  grid-template-rows: 1fr;
+}
+.fold > div {
   overflow: hidden;
+  min-height: 0;
 }
-.react-flow__controls-button {
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  color: var(--text);
-  fill: var(--text);
-  width: 34px;
-  height: 34px;
+
+.react-flow__node {
+  transition:
+    box-shadow 0.15s,
+    border-color 0.15s,
+    filter 0.15s;
 }
-.react-flow__controls-button:hover {
-  background: var(--surface-2);
+.react-flow__node:hover {
+  filter: brightness(1.12);
+}
+
+#editor {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot,
+  .sheet-in,
+  .sheet-out,
+  .sheet-in.sheet-bottom,
+  .sheet-out.sheet-bottom,
+  .fade-in,
+  .fade-out,
+  .appear,
+  .progress-bar,
+  .enter,
+  .pop,
+  .cell-in,
+  .grow-x,
+  .grow-y,
+  .attention,
+  .streaming > :last-child::after {
+    animation: none;
+  }
+  .fold,
+  .react-flow__node,
+  .glide {
+    transition: none !important;
+  }
+  #editor {
+    scroll-behavior: auto;
+  }
 }

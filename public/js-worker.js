@@ -1,5 +1,11 @@
 // Runs learner JavaScript in an isolated worker (a fresh one per run).
+// Lesson runs: {id, code, tests}. Sandbox runs add {sandbox: true, files, main,
+// stdin}: several files joined by require("./name"), input() from stdin and
+// output streamed while running.
 const MAX_OUT = 20000;
+const MAX_OUT_SANDBOX = 400000;
+// new Function / AsyncFunction put two lines of their own before the body.
+const WRAPPER_LINES = 2;
 
 // Node-like formatting so predicted output matches what learners expect.
 function inspect(v, depth, nested) {
@@ -28,13 +34,38 @@ function inspect(v, depth, nested) {
   return `${name}{ ${body.join(", ")} }`;
 }
 
+/** Where in the learner's own files the error was thrown, from the stack. */
+function errorLine(err, files) {
+  const stack = String((err && err.stack) || "");
+  for (const f of files) {
+    const re = new RegExp(f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ":(\\d+):(\\d+)");
+    const m = re.exec(stack);
+    if (m) return { file: f, line: Math.max(1, Number(m[1]) - WRAPPER_LINES) };
+  }
+  return null;
+}
+
 self.onmessage = async (e) => {
-  const { id, code, tests } = e.data;
+  const { id, code, tests, sandbox, files, main, stdin } = e.data;
+  const limit = sandbox ? MAX_OUT_SANDBOX : MAX_OUT;
   let out = "";
-  const write = (...args) => {
-    if (out.length < MAX_OUT) out += args.map((a) => inspect(a, 0, false)).join(" ") + "\n";
+  let pending = "";
+  let timer = null;
+  const flush = () => {
+    timer = null;
+    if (pending) self.postMessage({ id, phase: "out", text: pending });
+    pending = "";
   };
-  const fakeConsole = { log: write, info: write, warn: write, error: write, debug: write };
+  const write = (...args) => {
+    if (out.length >= limit) return;
+    const line = args.map((a) => inspect(a, 0, false)).join(" ") + "\n";
+    out += line;
+    if (sandbox) {
+      pending += line;
+      timer ??= setTimeout(flush, 60);
+    }
+  };
+  const fakeConsole = { log: write, info: write, warn: write, error: write, debug: write, table: write };
   const assert = (cond, message) => {
     if (!cond) throw new Error("Проверка не прошла" + (message ? ": " + message : ""));
   };
@@ -43,15 +74,46 @@ self.onmessage = async (e) => {
     const b = inspect(want, 0, true);
     if (a !== b) throw new Error(`${message ? message + ": " : ""}получено ${a}, ожидалось ${b}`);
   };
+  const lines = typeof stdin === "string" && stdin.length ? stdin.replace(/\r\n?/g, "\n").split("\n") : [];
+  const input = (promptText) => {
+    if (promptText) write(String(promptText));
+    return lines.length ? lines.shift() : null;
+  };
+
+  const all = sandbox ? files || [] : [];
+  const mainName = sandbox ? main || "main.js" : "code.js";
+  const source = sandbox ? (all.find((f) => f.name === mainName) || { content: code || "" }).content : code;
+
+  // CommonJS between the sandbox files: require("./utils") or require("./utils.js").
+  const cache = {};
+  const require = (spec) => {
+    const name = String(spec).replace(/^\.\//, "");
+    const file = all.find((f) => f.name === name || f.name === name + ".js");
+    if (!file) throw new Error(`Модуль "${spec}" не найден. Доступны: ${all.map((f) => "./" + f.name).join(", ") || "нет других файлов"}`);
+    if (cache[file.name]) return cache[file.name].exports;
+    const module = { exports: {} };
+    cache[file.name] = module;
+    const fn = new Function("module", "exports", "require", "console", "input", "prompt", file.content + "\n//# sourceURL=" + file.name);
+    fn(module, module.exports, require, fakeConsole, input, input);
+    return module.exports;
+  };
+
   self.postMessage({ id, phase: "running" });
   try {
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-    const fn = new AsyncFunction("console", "assert", "assertEqual", code + "\n;\n" + (tests || ""));
-    await fn(fakeConsole, assert, assertEqual);
+    const body = source + "\n;\n" + (tests || "") + "\n//# sourceURL=" + mainName;
+    const fn = new AsyncFunction("console", "assert", "assertEqual", "require", "input", "prompt", "module", "exports", body);
+    const module = { exports: {} };
+    await fn(fakeConsole, assert, assertEqual, require, input, input, module, module.exports);
+    if (timer) clearTimeout(timer), flush();
     self.postMessage({ id, ok: true, stdout: out, error: null });
   } catch (err) {
     const name = err && err.name ? err.name : "Error";
     const message = err && err.message ? err.message : String(err);
-    self.postMessage({ id, ok: false, stdout: out, error: `${name}: ${message}` });
+    if (timer) clearTimeout(timer), flush();
+    let at = errorLine(err, sandbox ? all.map((f) => f.name) : [mainName]);
+    // A failing test is not a line of the learner's code.
+    if (at && !sandbox && at.line > String(code).split("\n").length) at = null;
+    self.postMessage({ id, ok: false, stdout: out, error: `${name}: ${message}`, errorAt: at });
   }
 };

@@ -6,7 +6,7 @@ import path from "node:path";
 import { DATA_DIR, ROOT } from "../paths";
 import * as schema from "./schema";
 
-export type Db = BetterSQLite3Database<typeof schema>;
+export type Db = BetterSQLite3Database<typeof schema> & { $client: Database.Database };
 
 const g = globalThis as unknown as { __tutorDb?: Db };
 
@@ -24,6 +24,12 @@ export function openDb(file: string): Db {
 export function getDb(): Db {
   if (!g.__tutorDb) g.__tutorDb = openDb(path.join(DATA_DIR, "tutor.db"));
   return g.__tutorDb;
+}
+
+/** Close the shared connection (before the database file is replaced); the next getDb() reopens it. */
+export function closeDb() {
+  g.__tutorDb?.$client.close();
+  g.__tutorDb = undefined;
 }
 
 export { schema };

@@ -1,4 +1,5 @@
-import { apiKey, getCustomBaseUrl, getRoles, roleProblem } from "../config";
+import { apiKey, getCustomBaseUrl, getDailyLimit, getRoles, roleProblem } from "../config";
+import { spentSince, startOfDay } from "../stats";
 import { getDb, schema } from "../db";
 import { claudeCodeProvider } from "../agent/claude-code";
 import { anthropicProvider } from "./anthropic";
@@ -38,6 +39,16 @@ export async function chatAs(
   const role = roleOverride ?? getRoles()[roleName];
   const problem = roleProblem(role);
   if (problem) throw new LlmError(`${problem}. Открой «Настройки».`);
+  const limit = role.provider === "mock" ? null : getDailyLimit();
+  if (limit !== null) {
+    const spent = spentSince(startOfDay());
+    if (spent >= limit) {
+      throw new LlmError(
+        `Дневной лимит расходов исчерпан: потрачено $${spent.toFixed(2)} из $${limit.toFixed(2)}. Завтра лимит обновится; поднять его можно в «Настройках».`,
+        429,
+      );
+    }
+  }
   const result = await providerFor(role.provider).chat({ ...req, model: role.model });
   getDb()
     .insert(schema.usage)

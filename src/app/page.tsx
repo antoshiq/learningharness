@@ -3,9 +3,15 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { GoalRing } from "@/components/Charts";
+import { PlanTasks } from "@/components/PlanTasks";
+import { FilePicker, type PickedFile } from "@/components/FilePicker";
 import { StartSession } from "@/components/StartSession";
-import { Badge, Button, Card, cx, inputClass, LinkButton, Notice, Page, Sheet, TopNav } from "@/components/ui";
-import { api, formatCost, formatTokens, plural } from "@/lib/api";
+import { Button, Card, Cells, Count, cx, Field, Icon, inputClass, LinkButton, Loading, Notice, PanelTitle, Segmented, Sheet, StatusItem, TopNav } from "@/components/ui";
+import { NEW_TOPIC_EVENT, notifyChanged, useWorkbench } from "@/components/workbench-context";
+import { api, daysWord, formatAgo, formatCost, formatTokens, plural } from "@/lib/api";
+import type { Stats } from "@/lib/types";
+import type { PlanView } from "@/server/studyplan";
 import type { TopicCard } from "@/server/sessions";
 
 interface Scan {
@@ -26,6 +32,7 @@ function NewTopic({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [title, setTitle] = useState("");
   const [goal, setGoal] = useState("");
   const [repoPath, setRepoPath] = useState("");
+  const [files, setFiles] = useState<PickedFile[]>([]);
   const [scan, setScan] = useState<Scan | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,51 +51,47 @@ function NewTopic({ open, onClose }: { open: boolean; onClose: () => void }) {
 
   const create = () =>
     guard(async () => {
-      const { id } = await api<{ id: number }>("/api/topics", { body: { kind, title, goal, repoPath } });
+      const uploads = kind === "topic" ? files.map(({ name, content, base64 }) => ({ name, content, base64 })) : [];
+      const { id } = await api<{ id: number }>("/api/topics", { body: { kind, title, goal, repoPath, uploads } });
       router.push(`/topics/${id}`);
     });
 
   return (
     <Sheet open={open} onClose={onClose} title="Что будем изучать?">
       <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-2">
-          {(
+        <Segmented
+          label="Что изучать"
+          value={kind}
+          onChange={setKind}
+          options={
             [
               ["topic", "Тема"],
               ["repo", "Мой репозиторий"],
             ] as const
-          ).map(([k, label]) => (
-            <button
-              key={k}
-              onClick={() => setKind(k)}
-              aria-pressed={kind === k}
-              className={cx("min-h-11 rounded-lg border text-sm", kind === k ? "border-accent bg-accent-soft font-medium text-accent" : "border-border text-muted")}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+          }
+        />
 
         {kind === "topic" ? (
           <>
+            <Field label="Тема">
+              <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Рекурсия в Python, производные, SQL JOIN" />
+            </Field>
+            <Field label="Чего хочешь достичь" hint="Что хочешь уметь в итоге и что уже знаешь. Чем конкретнее, тем точнее план.">
+              <textarea className={cx(inputClass, "min-h-24 resize-y")} value={goal} onChange={(e) => setGoal(e.target.value)} />
+            </Field>
             <div>
-              <div className="mb-1.5 text-sm text-muted">Тема</div>
-              <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Например: рекурсия в Python, производные, SQL JOIN" />
-            </div>
-            <div>
-              <div className="mb-1.5 text-sm text-muted">Чего хочешь достичь</div>
-              <textarea
-                className={cx(inputClass, "min-h-24 resize-y")}
-                value={goal}
-                onChange={(e) => setGoal(e.target.value)}
-                placeholder="Что ты хочешь уметь в итоге и что уже знаешь. Чем конкретнее, тем точнее план."
-              />
+              <div className="mb-1 text-[13px] text-bright">Материалы (необязательно)</div>
+              <FilePicker files={files} onChange={setFiles} />
+              <p className="mt-1.5 text-xs text-muted">
+                {files.length
+                  ? "Репетитор будет учить по этим файлам: план, объяснения и вопросы — по их содержанию. Тему можно не называть, возьмётся имя файла."
+                  : "Например, лекции к экзамену или глава учебника: репетитор построит план и вопросы по ним. Секреты (.env, ключи) не принимаются."}
+              </p>
             </div>
           </>
         ) : (
           <>
-            <div>
-              <div className="mb-1.5 text-sm text-muted">Путь к папке проекта на этом компьютере</div>
+            <Field label="Папка проекта на этом компьютере или ссылка на GitHub">
               <input
                 className={cx(inputClass, "font-mono text-[15px]")}
                 value={repoPath}
@@ -96,26 +99,25 @@ function NewTopic({ open, onClose }: { open: boolean; onClose: () => void }) {
                   setRepoPath(e.target.value);
                   setScan(null);
                 }}
-                placeholder="C:\Users\...\my-project"
+                placeholder="C:\Users\...\my-project или https://github.com/owner/repo"
                 spellCheck={false}
                 autoCapitalize="off"
                 autoCorrect="off"
               />
-            </div>
-            <div>
-              <div className="mb-1.5 text-sm text-muted">Что хочешь понять</div>
+            </Field>
+            <Field label="Что хочешь понять">
               <textarea
                 className={cx(inputClass, "min-h-20 resize-y")}
                 value={goal}
                 onChange={(e) => setGoal(e.target.value)}
-                placeholder="Например: понять, как устроен проект целиком, чтобы вносить изменения самому"
+                placeholder="Как устроен проект целиком, чтобы вносить изменения самому"
               />
-            </div>
+            </Field>
             <p className="text-sm text-muted">
               Папка читается только на чтение. Зависимости, сборки, бинарные файлы и файлы с секретами (.env, ключи) пропускаются и модели не отправляются.
             </p>
             {scan && (
-              <div className="space-y-1.5 rounded-lg bg-surface-2 px-3.5 py-3 text-sm">
+              <div className="space-y-1.5 rounded-md border border-border bg-surface-2 px-3.5 py-3 text-sm">
                 <div>
                   Доступно для чтения: <b>{scan.files}</b> файлов, около <b>{formatTokens(scan.estTokens)}</b> токенов.
                 </div>
@@ -144,12 +146,12 @@ function NewTopic({ open, onClose }: { open: boolean; onClose: () => void }) {
               disabled={busy || !repoPath.trim()}
               onClick={() => guard(async () => setScan(await api<Scan>("/api/repo/scan", { body: { path: repoPath } })))}
             >
-              {busy ? "Сканирую…" : "Оценить объём"}
+              {busy ? (/github\.com/i.test(repoPath) ? "Скачиваю с GitHub…" : "Сканирую…") : "Оценить объём"}
             </Button>
           )}
           {(kind === "topic" || scan) && (
-            <Button className="flex-1" variant="primary" disabled={busy || (kind === "topic" && !title.trim())} onClick={create}>
-              Создать
+            <Button className="flex-1" variant="primary" disabled={busy || (kind === "topic" && !title.trim() && !files.length)} onClick={create}>
+              {busy && files.some((f) => f.base64) ? "Читаю файлы…" : "Создать тему"}
             </Button>
           )}
         </div>
@@ -164,123 +166,356 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [start, setStart] = useState<{ topicId: number; kind: "lesson" | "review" } | null>(null);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [plans, setPlans] = useState<PlanView[]>([]);
 
   const load = useCallback(async () => {
     try {
       const d = await api<{ topics: TopicCard[]; modelProblem: string | null }>("/api/topics");
       setTopics(d.topics);
       setModelProblem(d.modelProblem);
+      notifyChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
   }, []);
   useEffect(() => {
     load();
+    api<Stats>("/api/stats")
+      .then(setStats)
+      .catch(() => {});
+    api<{ plans: PlanView[] }>("/api/plans")
+      .then((r) => setPlans(r.plans.filter((p) => p.daysLeft >= 0)))
+      .catch(() => {});
   }, [load]);
 
   const due = (topics ?? []).filter((t) => t.due > 0);
   const dueTotal = due.reduce((s, t) => s + t.due, 0);
+  const all = topics ?? [];
+  const ideasAll = all.reduce((s, t) => s + t.total, 0);
+  const masteredAll = all.reduce((s, t) => s + t.mastered, 0);
+  const learningAll = all.reduce((s, t) => s + t.learning, 0);
+  const openLessons = all.filter((t) => t.openSessionId);
+  const { model, mock, openPalette } = useWorkbench();
+
+  // The command palette can ask for the new-topic form: by event on this page, by ?new=1 from another.
+  useEffect(() => {
+    const open = () => setCreating(true);
+    if (new URLSearchParams(window.location.search).has("new")) {
+      open();
+      window.history.replaceState(null, "", "/");
+    }
+    window.addEventListener(NEW_TOPIC_EVENT, open);
+    return () => window.removeEventListener(NEW_TOPIC_EVENT, open);
+  }, []);
 
   return (
     <>
       <TopNav
-        right={
-          <Link href="/settings" className="flex min-h-10 items-center rounded-lg px-2.5 text-sm text-muted hover:bg-surface-2 hover:text-text">
-            Настройки
-          </Link>
+        tab="Темы"
+        icon="files"
+        status={
+          topics && (
+            <>
+              <StatusItem icon="files">
+                {topics.length} {plural(topics.length, "тема", "темы", "тем")}
+              </StatusItem>
+              <StatusItem icon="check" title="Освоено идей по всем темам">
+                {masteredAll} из {ideasAll}
+              </StatusItem>
+              {dueTotal > 0 && <StatusItem icon="clock">Повторить: {dueTotal}</StatusItem>}
+              {modelProblem && <StatusItem icon="info">Модель не настроена</StatusItem>}
+            </>
+          )
         }
       />
-      <Page>
-        {error && <Notice tone="bad">{error}</Notice>}
-        {modelProblem && (
-          <Notice tone="warn">
-            {modelProblem}. Без этого уроки не запустятся.{" "}
-            <Link href="/settings" className="font-medium underline">
-              Открыть настройки
-            </Link>
-          </Notice>
+      <main className="enter mx-auto w-full max-w-6xl px-4 pt-5 pb-16 sm:px-6">
+        {(error || modelProblem) && (
+          <div className="mb-5 space-y-2">
+            {error && <Notice tone="bad">{error}</Notice>}
+            {modelProblem && (
+              <Notice tone="warn">
+                {modelProblem}. Без этого уроки не запустятся.{" "}
+                <Link href="/settings" className="text-accent hover:underline">
+                  Открыть настройки
+                </Link>
+              </Notice>
+            )}
+          </div>
         )}
 
-        {dueTotal > 0 && (
-          <section className="mt-4">
-            <h2 className="mb-2 text-sm font-medium text-muted">Сначала повторение</h2>
-            <Card className="space-y-3">
-              <p>
-                Пора повторить <b>{dueTotal}</b> {plural(dueTotal, "идею", "идеи", "идей")}. Это занимает несколько минут и удерживает пройденное в памяти.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {due.map((t) => (
-                  <Button key={t.id} variant="primary" onClick={() => setStart({ topicId: t.id, kind: "review" })}>
-                    {t.title} · {t.due}
-                  </Button>
-                ))}
-              </div>
-            </Card>
-          </section>
-        )}
-
-        <section className="mt-6">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-medium text-muted">Темы</h2>
-            <Button small variant="primary" onClick={() => setCreating(true)}>
-              + Новая
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="text-[22px] leading-tight font-normal text-bright">Репетитор</h1>
+            <p className="text-[13px] text-muted">Программирование и математика, шаг за шагом</p>
+          </div>
+          <div className="flex gap-2">
+            <LinkButton href="/brief">
+              <Icon name="compass" /> Быстрый экскурс
+            </LinkButton>
+            <Button variant="primary" onClick={() => setCreating(true)}>
+              <Icon name="plus" /> Новая тема
             </Button>
           </div>
-          {topics === null ? (
-            <div className="text-sm text-muted">Загрузка…</div>
-          ) : topics.length === 0 ? (
-            <Card className="text-center">
-              <p className="mb-1 font-medium">Пока ничего нет</p>
-              <p className="mb-4 text-sm text-muted">
-                Назови тему или укажи свой репозиторий. Репетитор сначала выяснит, что ты уже знаешь, потом построит план и поведёт по нему.
-              </p>
-              <Button variant="primary" onClick={() => setCreating(true)}>
-                Начать первую тему
-              </Button>
-            </Card>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {topics.map((t) => {
-                const pct = t.total ? Math.round((t.mastered / t.total) * 100) : 0;
-                return (
-                  <Card key={t.id} className="flex flex-col gap-3">
-                    <div>
-                      <div className="flex items-start justify-between gap-2">
-                        <Link href={`/topics/${t.id}`} className="font-medium hover:underline">
-                          {t.title}
-                        </Link>
-                        {t.kind === "repo" && <Badge>репозиторий</Badge>}
-                      </div>
-                      {t.goal && <p className="mt-0.5 line-clamp-2 text-sm text-muted">{t.goal}</p>}
-                    </div>
-                    <div>
-                      <div className="h-2 overflow-hidden rounded-full bg-surface-2" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
-                        <div className="h-full rounded-full bg-ok" style={{ width: `${pct}%` }} />
-                      </div>
-                      <div className="mt-1 text-xs text-muted">
-                        {t.total ? `Освоено ${t.mastered} из ${t.total}` : "План появится на первом уроке"}
-                        {t.learning ? ` · в процессе ${t.learning}` : ""}
-                      </div>
-                    </div>
-                    <div className="mt-auto flex gap-2">
-                      {t.openSessionId ? (
-                        <LinkButton href={`/session/${t.openSessionId}`} variant="primary" className="flex-1">
-                          Продолжить урок
-                        </LinkButton>
-                      ) : (
-                        <Button variant="primary" className="flex-1" onClick={() => setStart({ topicId: t.id, kind: "lesson" })}>
-                          {t.total ? "Новый урок" : "Начать"}
+        </div>
+
+        {topics === null ? (
+          !error && <Loading />
+        ) : (
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
+            <div className="min-w-0 space-y-4">
+              {/* Totals across all topics */}
+              <dl className="grid grid-cols-2 overflow-hidden rounded-md border border-border bg-surface sm:grid-cols-4">
+                {(
+                  [
+                    ["Освоено идей", `${masteredAll} из ${ideasAll}`, "text-ok"],
+                    ["В процессе", String(learningAll), "text-warn"],
+                    ["Пора повторить", String(dueTotal), dueTotal ? "text-accent" : "text-bright"],
+                    ["Открытых уроков", String(openLessons.length), "text-bright"],
+                  ] as const
+                ).map(([label, value, tone], i) => (
+                  <div key={label} style={{ "--i": i + 1 } as React.CSSProperties} className={cx("enter border-border px-3 py-2.5", i % 2 === 1 && "border-l", i >= 2 && "border-t sm:border-t-0", i === 2 && "sm:border-l")}>
+                    <dt className="text-xs text-muted">{label}</dt>
+                    <dd className={cx("mt-0.5 text-lg leading-tight tabular-nums", tone)}>{value}</dd>
+                  </div>
+                ))}
+              </dl>
+
+              {plans.map((p) => (
+                <section key={p.id} className="enter overflow-hidden rounded-md border border-border bg-surface">
+                  <PanelTitle
+                    right={
+                      <Link href={`/plan/${p.id}`} className="text-xs text-accent hover:underline">
+                        {p.title}: {daysWord(p.daysLeft)}
+                      </Link>
+                    }
+                  >
+                    План на сегодня
+                  </PanelTitle>
+                  <div className="px-1 py-1.5">{p.days[0] && <PlanTasks tasks={p.days[0].tasks} today />}</div>
+                </section>
+              ))}
+
+              {dueTotal > 0 && (
+                <section className="overflow-hidden rounded-md border border-border bg-surface">
+                  <PanelTitle
+                    right={
+                      <LinkButton small href="/review" variant="primary">
+                        <Icon name="play" /> Повторить всё
+                      </LinkButton>
+                    }
+                  >
+                    Сначала повторение
+                  </PanelTitle>
+                  <p className="border-b border-border px-3 py-1.5 text-xs text-muted">«Повторить всё» задаёт вопросы из прошлых уроков без репетитора, по всем темам сразу. Кнопка в строке — повторение с репетитором.</p>
+                  <ul className="divide-y divide-border">
+                    {due.map((t) => (
+                      <li key={t.id} className="flex items-center gap-3 px-3 py-1.5">
+                        <Icon name="clock" className="text-accent" />
+                        <span className="min-w-0 flex-1 truncate text-bright">{t.title}</span>
+                        <span className="shrink-0 text-xs text-muted">
+                          {t.due} {plural(t.due, "идея", "идеи", "идей")}
+                        </span>
+                        <Button small variant="ghost" onClick={() => setStart({ topicId: t.id, kind: "review" })}>
+                          С репетитором
                         </Button>
-                      )}
-                      <LinkButton href={`/topics/${t.id}`}>Обзор</LinkButton>
-                    </div>
-                  </Card>
-                );
-              })}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {topics.length === 0 ? (
+                <Card className="sm:p-8">
+                  <h2 className="text-lg text-bright">Тем пока нет</h2>
+                  <p className="mt-1.5 max-w-[60ch] text-muted">
+                    Назови тему или укажи свой репозиторий. Репетитор сначала выяснит, что ты уже знаешь, потом построит план и поведёт по нему шаг за шагом.
+                  </p>
+                  <Button variant="primary" className="mt-4" onClick={() => setCreating(true)}>
+                    Начать первую тему
+                  </Button>
+                </Card>
+              ) : (
+                <section className="overflow-hidden rounded-md border border-border bg-surface">
+                  <PanelTitle right={<span className="text-xs text-muted tabular-nums">{topics.length}</span>}>Темы</PanelTitle>
+                  <div className="hidden h-7 items-center gap-4 border-b border-border px-3 text-xs text-muted md:flex">
+                    <span className="flex-1">Название</span>
+                    <span className="w-44">Прогресс</span>
+                    <span className="w-24">Активность</span>
+                    <span className="w-[216px]" />
+                  </div>
+                  <ul className="divide-y divide-border">
+                    {topics.map((t, i) => (
+                      <li key={t.id} style={{ "--i": i + 3 } as React.CSSProperties} className="enter flex flex-col gap-2.5 px-3 py-2.5 transition-colors hover:bg-surface-2/50 md:flex-row md:items-center md:gap-4 md:py-2">
+                        <Link href={`/topics/${t.id}`} className="group flex min-w-0 flex-1 items-start gap-2">
+                          <Icon name={t.kind === "repo" ? "repo" : "file"} className="mt-[3px] text-accent" />
+                          <span className="min-w-0">
+                            <span className="flex items-center gap-2">
+                              <span className="truncate text-bright group-hover:text-accent">{t.title}</span>
+                              {t.due > 0 && <Count n={t.due} active />}
+                            </span>
+                            <span className="line-clamp-1 block text-xs text-muted">{t.kind === "repo" ? t.repoPath : t.goal || "Без описания цели"}</span>
+                          </span>
+                        </Link>
+                        <div className="shrink-0 md:w-44">
+                          {t.total > 0 ? (
+                            <>
+                              <Cells total={t.total} mastered={t.mastered} learning={t.learning} />
+                              <div className="mt-1 text-xs text-muted tabular-nums">
+                                {t.mastered} из {t.total}
+                                {t.learning ? `, в процессе ${t.learning}` : ""}
+                              </div>
+                            </>
+                          ) : (
+                            <span className="text-xs text-muted">План появится на первом уроке</span>
+                          )}
+                        </div>
+                        <div className="hidden w-24 shrink-0 text-xs text-muted md:block">{formatAgo(t.updatedAt)}</div>
+                        <div className="flex shrink-0 gap-2 md:w-[216px] md:justify-end">
+                          {t.openSessionId ? (
+                            <LinkButton small href={`/session/${t.openSessionId}`} variant="primary" className="flex-1 md:flex-none">
+                              <Icon name="play" /> Продолжить урок
+                            </LinkButton>
+                          ) : (
+                            <Button small variant="primary" className="flex-1 md:flex-none" onClick={() => setStart({ topicId: t.id, kind: "lesson" })}>
+                              <Icon name="play" /> {t.total ? "Новый урок" : "Начать"}
+                            </Button>
+                          )}
+                          <LinkButton small href={`/topics/${t.id}`}>
+                            Обзор
+                          </LinkButton>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
             </div>
-          )}
-        </section>
-      </Page>
+
+            <aside className="space-y-4">
+              {stats && (
+                <Link href="/stats" className="group block overflow-hidden rounded-md border border-border bg-surface hover:border-border-strong">
+                  <PanelTitle right={<span className="text-xs text-accent group-hover:underline">Статистика</span>}>Активность</PanelTitle>
+                  <div className="flex items-center gap-3 px-3 py-2.5">
+                    <GoalRing done={stats.goal.today} target={stats.goal.target} size={48} />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] text-bright">
+                        {stats.goal.today >= stats.goal.target ? "Цель на сегодня выполнена" : `Цель: ${stats.goal.today} из ${stats.goal.target} ответов`}
+                      </div>
+                      <div className="flex items-center gap-1 text-xs text-muted tabular-nums">
+                        <Icon name="flame" size={13} className={stats.streak.current ? "text-warn" : ""} />
+                        {stats.streak.current} {plural(stats.streak.current, "день", "дня", "дней")} подряд
+                      </div>
+                      <div className="text-xs text-muted">
+                        сегодня {stats.days.find((d) => d.date === stats.today)?.answers ?? 0} {plural(stats.days.find((d) => d.date === stats.today)?.answers ?? 0, "ответ", "ответа", "ответов")}
+                        {stats.streak.longest > stats.streak.current ? ` · рекорд ${stats.streak.longest}` : ""}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex gap-[3px] px-3 pb-3" aria-hidden>
+                    {Array.from({ length: 21 }, (_, i) => {
+                      const d = new Date();
+                      d.setDate(d.getDate() - 20 + i);
+                      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                      const n = stats.days.find((x) => x.date === key)?.answers ?? 0;
+                      return <span key={i} style={{ "--i": i } as React.CSSProperties} className={cx("cell-in h-2.5 flex-1 rounded-[2px]", `heat-${n === 0 ? 0 : n < 3 ? 1 : n < 6 ? 2 : n < 12 ? 3 : 4}`)} />;
+                    })}
+                  </div>
+                </Link>
+              )}
+
+              <section className="overflow-hidden rounded-md border border-border bg-surface">
+                <PanelTitle>Быстрый старт</PanelTitle>
+                <ul className="py-1 text-[13px]">
+                  {openLessons.map((t) => (
+                    <li key={t.id}>
+                      <Link href={`/session/${t.openSessionId}`} className="flex min-h-8 items-center gap-2 px-3 text-accent hover:bg-surface-2 sm:min-h-[26px]">
+                        <Icon name="play" />
+                        <span className="truncate">Продолжить: {t.title}</span>
+                      </Link>
+                    </li>
+                  ))}
+                  <li>
+                    <button onClick={() => setCreating(true)} className="flex min-h-8 w-full items-center gap-2 px-3 text-left text-accent hover:bg-surface-2 sm:min-h-[26px]">
+                      <Icon name="plus" /> Новая тема
+                    </button>
+                  </li>
+                  {dueTotal > 0 && (
+                    <li>
+                      <Link href="/review" className="flex min-h-8 items-center gap-2 px-3 text-accent hover:bg-surface-2 sm:min-h-[26px]">
+                        <Icon name="clock" /> Повторение на сегодня: {dueTotal}
+                      </Link>
+                    </li>
+                  )}
+                  <li>
+                    <Link href="/plan" className="flex min-h-8 items-center gap-2 px-3 text-accent hover:bg-surface-2 sm:min-h-[26px]">
+                      <Icon name="calendar" /> Подготовка к дате
+                    </Link>
+                  </li>
+                  <li>
+                    <Link href="/sandbox" className="flex min-h-8 items-center gap-2 px-3 text-accent hover:bg-surface-2 sm:min-h-[26px]">
+                      <Icon name="play" /> Песочница кода
+                    </Link>
+                  </li>
+                  <li>
+                    <Link href="/brief" className="flex min-h-8 items-center gap-2 px-3 text-accent hover:bg-surface-2 sm:min-h-[26px]">
+                      <Icon name="compass" /> Быстрый экскурс
+                    </Link>
+                  </li>
+                  <li>
+                    <Link href="/mistakes" className="flex min-h-8 items-center gap-2 px-3 text-accent hover:bg-surface-2 sm:min-h-[26px]">
+                      <Icon name="target" /> Работа над ошибками
+                    </Link>
+                  </li>
+                  <li>
+                    <button onClick={openPalette} className="flex min-h-8 w-full items-center gap-2 px-3 text-left text-accent hover:bg-surface-2 sm:min-h-[26px]">
+                      <Icon name="search" /> Найти тему или команду
+                    </button>
+                  </li>
+                  <li>
+                    <Link href="/settings" className="flex min-h-8 items-center gap-2 px-3 text-accent hover:bg-surface-2 sm:min-h-[26px]">
+                      <Icon name="gear" /> Ключи и модели
+                    </Link>
+                  </li>
+                </ul>
+              </section>
+
+              <section className="hidden overflow-hidden rounded-md border border-border bg-surface sm:block">
+                <PanelTitle>Клавиши</PanelTitle>
+                <dl className="space-y-1.5 px-3 py-2.5 text-[13px]">
+                  {(
+                    [
+                      ["Поиск и команды", "Ctrl+K"],
+                      ["Проводник", "Ctrl+B"],
+                      ["Выбрать вариант", "1–9"],
+                      ["Ответить", "Ctrl+Enter"],
+                      ["Подсказка", "H"],
+                      ["Дальше в повторении", "Enter"],
+                      ["Отправить сообщение", "Enter"],
+                      ["Закрыть окно", "Esc"],
+                    ] as const
+                  ).map(([what, keys]) => (
+                    <div key={what} className="flex items-center justify-between gap-3">
+                      <dt className="text-muted">{what}</dt>
+                      <dd>
+                        <kbd className="rounded-sm border border-border-strong bg-surface-2 px-1.5 py-px font-sans text-[11px] text-text">{keys}</kbd>
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+
+              <section className="overflow-hidden rounded-md border border-border bg-surface">
+                <PanelTitle>Модель</PanelTitle>
+                <div className="px-3 py-2.5 text-[13px]">
+                  <div className="truncate font-mono text-xs text-bright">{mock ? "тестовая заглушка" : (model ?? "не выбрана")}</div>
+                  <p className="mt-1 text-xs text-muted">Ведёт уроки, практику и повторение. Сменить можно в настройках.</p>
+                </div>
+              </section>
+            </aside>
+          </div>
+        )}
+      </main>
       <NewTopic open={creating} onClose={() => setCreating(false)} />
       <StartSession topicId={start?.topicId ?? 0} kind={start?.kind ?? null} onClose={() => setStart(null)} />
     </>

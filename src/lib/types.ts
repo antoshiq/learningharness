@@ -121,6 +121,8 @@ export type StreamEvent =
   | { type: "status"; text: string }
   | { type: "graded"; attemptId: number; outcome: Outcome }
   | { type: "error"; message: string }
+  /** Something new was stored, e.g. a quick overview; carries its id. */
+  | { type: "saved"; id: number }
   | { type: "done" };
 
 export type TurnInput =
@@ -150,6 +152,11 @@ export interface AppConfig {
   customBaseUrl: string;
   has: { anthropic: boolean; openrouter: boolean; custom: boolean; customKey: boolean };
   mockEnabled: boolean;
+  /** Daily spending cap in USD, or null. */
+  dailyLimit: number | null;
+  spentToday: number;
+  /** Answers per day the learner aims for. */
+  dailyGoal: number;
 }
 
 export const MISCONCEPTION_TYPES = [
@@ -161,3 +168,59 @@ export const MISCONCEPTION_TYPES = [
   "невнимательность",
   "другое",
 ] as const;
+
+/** A stored question offered again without the tutor (review queue, mistake practice). */
+export interface DrillItem {
+  /** The lesson attempt the question comes from, or minus the card id for a card. */
+  attemptId: number;
+  /** Set for cards (made from an overview, a cheat sheet or for an exam). */
+  cardId?: number;
+  question: Question;
+  topic: { id: number; title: string };
+  node: { key: string; title: string } | null;
+  /** What happened the last time this question was answered. */
+  last: { outcome: Outcome | null; answer: AnswerPayload | null; misconception: string | null; at: number };
+  /** Review only: how many days the node is overdue. */
+  overdueDays?: number;
+}
+
+/** Topics whose due ideas have no stored question to reuse: only the tutor can review them. */
+export interface TutorReview {
+  topicId: number;
+  title: string;
+  nodes: number;
+}
+
+export type SelfGrade = "correct" | "partial" | "wrong";
+
+/** Kinds the browser cannot check; the learner compares with the reference answer. */
+export const SELF_GRADED: QuestionKind[] = ["free", "math"];
+
+/** One calendar day of activity, keyed by local date "YYYY-MM-DD". */
+export interface DayActivity {
+  date: string;
+  answers: number;
+  correct: number;
+  /** Of `answers`, how many were practice without the tutor. */
+  drills: number;
+}
+
+export interface DayCost {
+  date: string;
+  cost: number;
+  tokens: number;
+  /** Some calls had no known price (subscription, custom server). */
+  unknown: boolean;
+}
+
+export interface Stats {
+  today: string;
+  days: DayActivity[];
+  streak: { current: number; longest: number; activeDays: number };
+  /** Today's answers against the daily goal, and how many recent days met it. */
+  goal: { target: number; today: number; metDays: number };
+  totals: { answers: number; correct: number; drills: number; minutes: number; sessions: number };
+  topics: { id: number; title: string; answers: number; correct: number; mastered: number; total: number }[];
+  calibration: { level: number; total: number; correct: number }[];
+  cost: { days: DayCost[]; today: number; month: number; all: number; known: boolean; limit: number | null };
+}

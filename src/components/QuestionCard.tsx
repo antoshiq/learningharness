@@ -4,37 +4,43 @@ import { useEffect, useMemo, useState } from "react";
 import { parsonsLines, seededShuffle } from "@/lib/grading";
 import { runCode, type RunOutcome } from "@/lib/runner";
 import { KIND_LABEL, PURPOSE_LABEL, type AnswerPayload, type Outcome, type Question, type TranscriptItem } from "@/lib/types";
+import { openInSandbox } from "@/lib/sandbox";
 import { CodeEditor } from "./CodeEditor";
+import { EditorFrame, toolButton } from "./EditorTools";
 import { Markdown } from "./Markdown";
-import { Badge, Button, cx, Dots, inputClass, Notice } from "./ui";
+import { Badge, Button, cx, Dots, Icon, inputClass, isKey, isSubmitKey, Kbd, KeyHandler, Mark, Notice, Segmented } from "./ui";
 
-type QItem = Extract<TranscriptItem, { type: "question" }>;
+export type QItem = Extract<TranscriptItem, { type: "question" }>;
 
-const OUTCOME: Record<Outcome, { label: string; tone: "ok" | "bad" | "warn" | "neutral" }> = {
-  correct: { label: "Верно", tone: "ok" },
-  partial: { label: "Частично", tone: "warn" },
-  wrong: { label: "Неверно", tone: "bad" },
-  skipped: { label: "Пропущен", tone: "neutral" },
+export const OUTCOME: Record<Outcome, { label: string; tone: "ok" | "bad" | "warn" | "neutral"; edge: string }> = {
+  correct: { label: "Верно", tone: "ok", edge: "border-l-ok" },
+  partial: { label: "Частично", tone: "warn", edge: "border-l-warn" },
+  wrong: { label: "Неверно", tone: "bad", edge: "border-l-bad" },
+  skipped: { label: "Пропущен", tone: "neutral", edge: "border-l-border-strong" },
 };
 
 function Header({ q, outcome, waiting }: { q: Question; outcome?: Outcome | null; waiting?: boolean }) {
   return (
-    <div className="mb-3 flex flex-wrap items-center gap-2">
-      <Badge tone="accent">{PURPOSE_LABEL[q.purpose]}</Badge>
-      <Badge>{KIND_LABEL[q.kind]}</Badge>
-      {outcome ? <Badge tone={OUTCOME[outcome].tone}>{OUTCOME[outcome].label}</Badge> : waiting ? <Badge tone="warn">Ждёт оценки</Badge> : null}
+    <div className="flex min-h-8 items-center gap-2.5 border-b border-border bg-surface px-3 text-xs">
+      <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2.5">
+        <span className="font-semibold text-accent">{PURPOSE_LABEL[q.purpose]}</span>
+        <span className="text-muted">{KIND_LABEL[q.kind]}</span>
+      </div>
+      {outcome ? <Mark tone={OUTCOME[outcome].tone}>{OUTCOME[outcome].label}</Mark> : waiting ? <Badge tone="warn">Ждёт оценки</Badge> : null}
     </div>
   );
 }
 
-function Output({ label, text, tone }: { label: string; text: string; tone?: "bad" }) {
+const Arrow = ({ up }: { up?: boolean }) => <Icon name={up ? "up" : "down"} className="mx-auto" />;
+
+export function Output({ label, text, tone }: { label: string; text: string; tone?: "bad" }) {
   return (
     <div>
       <div className="mb-1 text-xs font-medium text-muted">{label}</div>
       <pre
         className={cx(
-          "max-h-60 overflow-auto rounded-lg border px-3 py-2 font-mono text-[13px] whitespace-pre-wrap",
-          tone === "bad" ? "border-bad bg-bad-soft text-bad" : "border-border bg-code",
+          "max-h-60 overflow-auto rounded-sm border px-3 py-2 font-mono text-[13px] whitespace-pre-wrap",
+          tone === "bad" ? "border-bad/50 bg-bad-soft text-bad" : "border-border bg-surface",
         )}
       >
         {text || "(пусто)"}
@@ -77,16 +83,24 @@ async function prepare(q: Question): Promise<Prep> {
 
 // ---------------------------------------------------------------------------
 
-function ActiveQuestion({
+export function ActiveQuestion({
   item,
   busy,
   onAnswer,
   onInvalid,
+  submitLabel,
+  seed,
+  noHints,
 }: {
   item: QItem;
   busy: boolean;
   onAnswer: (a: AnswerPayload) => void;
   onInvalid: (detail: string) => void;
+  submitLabel?: string;
+  /** Shuffle seed; defaults to the attempt id so a reload shows the same order. */
+  seed?: number;
+  /** Exam: hints are not offered. */
+  noHints?: boolean;
 }) {
   const q = item.question;
   const runnable = q.kind === "code" || q.kind === "find_bug" || q.kind === "predict_output";
@@ -96,7 +110,7 @@ function ActiveQuestion({
   const [text, setText] = useState("");
   const [code, setCode] = useState(q.kind === "code" || q.kind === "find_bug" ? (q.code ?? "") : "");
   const [rows, setRows] = useState(() =>
-    seededShuffle([...parsonsLines(q.solution ?? ""), ...(q.distractors ?? [])], item.attemptId).map((t) => ({ text: t, used: true })),
+    seededShuffle([...parsonsLines(q.solution ?? ""), ...(q.distractors ?? [])], seed ?? item.attemptId).map((t) => ({ text: t, used: true })),
   );
   const [hints, setHints] = useState(0);
   const [confidence, setConfidence] = useState<1 | 2 | 3 | null>(null);
@@ -105,10 +119,13 @@ function ActiveQuestion({
   const [run, setRun] = useState<RunOutcome | null>(null);
   const [working, setWorking] = useState<null | "run" | "submit">(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [full, setFull] = useState(false);
+  // The code the last run was of: an error line is marked only while the code is unchanged.
+  const [ranCode, setRanCode] = useState<string | null>(null);
 
   const order = useMemo(
-    () => seededShuffle((q.options ?? []).map((_, i) => i), item.attemptId),
-    [q.options, item.attemptId],
+    () => seededShuffle((q.options ?? []).map((_, i) => i), seed ?? item.attemptId),
+    [q.options, item.attemptId, seed],
   );
 
   useEffect(() => {
@@ -196,6 +213,7 @@ function ActiveQuestion({
       setWorking(null);
       if (r.infra) return setProblem("Не удалось запустить код: " + (r.error ?? ""));
       setRun(r);
+      setRanCode(code);
       return onAnswer({ code, run: { ok: r.ok, stdout: r.stdout, error: r.error, timedOut: r.timedOut }, ...common() });
     }
     onAnswer({ text, ...common() });
@@ -203,9 +221,12 @@ function ActiveQuestion({
 
   const tryRun = async () => {
     setWorking("run");
-    setRun(await runCode(q.language!, code));
+    const snapshot = code;
+    setRun(await runCode(q.language!, snapshot));
+    setRanCode(snapshot);
     setWorking(null);
   };
+  const errorLine = run?.errorAt && ranCode === code ? run.errorAt.line : null;
 
   const move = (i: number, d: -1 | 1) =>
     setRows((rs) => {
@@ -216,25 +237,56 @@ function ActiveQuestion({
       return next;
     });
 
+  const hintsLeft = noHints ? 0 : (q.hints?.length ?? 0) - hints;
+  const onKey = (e: KeyboardEvent, typing: boolean) => {
+    if (isSubmitKey(e)) {
+      if (canSubmit) {
+        e.preventDefault();
+        submit();
+      }
+      return;
+    }
+    if (typing || e.ctrlKey || e.metaKey) return;
+    if (q.kind === "choice" && /^[1-9]$/.test(e.key) && Number(e.key) <= order.length) {
+      e.preventDefault();
+      setChoice(order[Number(e.key) - 1]);
+    } else if (q.kind === "choice" && e.key === "Enter" && canSubmit && (e.target as HTMLElement)?.tagName !== "BUTTON") {
+      e.preventDefault();
+      submit();
+    } else if (isKey(e, "h") && hintsLeft > 0) {
+      e.preventDefault();
+      setHints((n) => n + 1);
+    }
+  };
+
   return (
     <div className="space-y-4">
+      <KeyHandler onKey={onKey} />
       {q.kind === "predict_output" && <CodeEditor value={q.code ?? ""} language={q.language} readOnly />}
 
       {q.kind === "choice" && (
         <div className="space-y-2" role="radiogroup">
-          {order.map((idx) => (
+          {order.map((idx, pos) => (
             <button
               key={idx}
               role="radio"
               aria-checked={choice === idx}
               onClick={() => setChoice(idx)}
               className={cx(
-                "flex min-h-12 w-full items-start gap-3 rounded-lg border px-3.5 py-2.5 text-left transition-colors",
-                choice === idx ? "border-accent bg-accent-soft" : "border-border bg-surface hover:bg-surface-2",
+                "group flex min-h-10 w-full items-start gap-3 rounded-sm border px-2.5 py-2 text-left transition-colors",
+                choice === idx ? "border-accent bg-accent-soft text-bright" : "border-transparent bg-surface hover:bg-surface-2",
               )}
             >
-              <span className={cx("mt-1 size-4 shrink-0 rounded-full border-2", choice === idx ? "border-accent bg-accent" : "border-muted")} />
-              <Markdown text={q.options![idx]} className="min-w-0 flex-1" />
+              <span
+                className={cx(
+                  "grid size-6 shrink-0 place-items-center rounded-sm font-mono text-xs transition-colors",
+                  choice === idx ? "bg-accent-strong text-accent-fg" : "bg-surface-2 text-muted group-hover:text-bright",
+                )}
+                aria-hidden
+              >
+                {pos + 1}
+              </span>
+              <Markdown text={q.options![idx]} className="min-w-0 flex-1 pt-0.5" />
             </button>
           ))}
         </div>
@@ -249,7 +301,7 @@ function ActiveQuestion({
             onChange={(e) => setText(e.target.value)}
           />
           {q.kind === "math" && text.includes("$") && (
-            <div className="rounded-lg border border-border bg-surface-2 px-3 py-2">
+            <div className="rounded-md border border-dashed border-border-strong px-3 py-2">
               <div className="mb-1 text-xs text-muted">Как это выглядит</div>
               <Markdown text={text.replace(/\n/g, "  \n")} />
             </div>
@@ -271,14 +323,55 @@ function ActiveQuestion({
 
       {(q.kind === "code" || q.kind === "find_bug") && (
         <div className="space-y-3">
-          <CodeEditor value={code} onChange={setCode} language={q.language} minHeight="160px" />
+          <EditorFrame
+            full={full}
+            onFull={setFull}
+            title={<span className="font-mono">{q.language === "python" ? "Python" : "JavaScript"}</span>}
+            actions={
+              <>
+                {code !== (q.code ?? "") && (
+                  <button type="button" className={toolButton} onClick={() => setCode(q.code ?? "")} title="Вернуть исходную заготовку">
+                    Сбросить
+                  </button>
+                )}
+                <button type="button" className={toolButton} onClick={() => openInSandbox(q.language!, code)} title="Открыть этот код в песочнице">
+                  В песочницу
+                </button>
+              </>
+            }
+          >
+            <CodeEditor
+              value={code}
+              onChange={setCode}
+              language={q.language}
+              minHeight="160px"
+              fill={full}
+              errorLine={errorLine}
+              errorMessage={run?.error?.split("\n").filter(Boolean).at(-1)}
+            />
+          </EditorFrame>
+          {full && (
+            // The run button and output stay reachable over the full-screen editor.
+            <div className="fixed right-4 bottom-4 z-[60] flex max-w-[min(560px,90vw)] flex-col items-end gap-2">
+              {run && (run.stdout || run.error) && (
+                <pre className={cx("max-h-48 w-full overflow-auto rounded-sm border px-3 py-2 font-mono text-[12px] whitespace-pre-wrap shadow-widget", run.error ? "border-bad/50 bg-bad-soft text-bad" : "border-border bg-surface")}>
+                  {run.stdout}
+                  {run.error}
+                </pre>
+              )}
+              <Button variant="primary" onClick={tryRun} disabled={!!working || busy}>
+                <Icon name="play" /> {working === "run" ? "Запускаю…" : "Запустить"}
+              </Button>
+            </div>
+          )}
           <Button small onClick={tryRun} disabled={!!working || busy}>
-            {working === "run" ? "Запускаю…" : "▶ Запустить"}
+            <Icon name="play" className="text-ok" />
+            {working === "run" ? "Запускаю…" : "Запустить"}
           </Button>
           {run && (
             <div className="space-y-2">
               {run.stdout && <Output label="Вывод" text={run.stdout} />}
-              {run.error && <Output label="Ошибка" text={run.error} tone="bad" />}
+              {run.error && <Output label={run.errorAt ? `Ошибка в строке ${run.errorAt.line}` : "Ошибка"} text={run.error} tone="bad" />}
               {!run.stdout && !run.error && <div className="text-sm text-muted">Выполнено без вывода.</div>}
             </div>
           )}
@@ -288,12 +381,12 @@ function ActiveQuestion({
       {q.kind === "parsons" && (
         <div className="space-y-1.5">
           <div className="text-sm text-muted">
-            Расставь строки в правильном порядке кнопками ↑ ↓.{q.distractors?.length ? " Лишние строки отключи галочкой." : ""}
+            Расставь строки в правильном порядке стрелками.{q.distractors?.length ? " Лишние строки отключи галочкой." : ""}
           </div>
           {rows.map((r, i) => (
             <div key={`${i}-${r.text}`} className={cx("flex items-stretch gap-1.5", !r.used && "opacity-45")}>
               {!!q.distractors?.length && (
-                <label className="grid w-10 shrink-0 place-items-center rounded-lg border border-border bg-surface">
+                <label className="grid w-10 shrink-0 place-items-center rounded-sm border border-border bg-surface">
                   <input
                     type="checkbox"
                     className="size-5"
@@ -303,31 +396,41 @@ function ActiveQuestion({
                   />
                 </label>
               )}
-              <pre className="min-w-0 flex-1 overflow-x-auto rounded-lg border border-border bg-code px-3 py-2.5 font-mono text-[13px] whitespace-pre">
+              <pre className="min-w-0 flex-1 overflow-x-auto rounded-sm border border-border bg-surface px-3 py-2 font-mono text-[13px] whitespace-pre">
                 {r.text}
               </pre>
-              <button onClick={() => move(i, -1)} disabled={i === 0} aria-label="Выше" className="w-11 shrink-0 rounded-lg border border-border bg-surface disabled:opacity-30">
-                ↑
+              <button
+                onClick={() => move(i, -1)}
+                disabled={i === 0}
+                aria-label="Выше"
+                className="w-11 shrink-0 rounded-md border border-border-strong bg-surface text-muted hover:border-accent hover:text-accent disabled:pointer-events-none disabled:opacity-30"
+              >
+                <Arrow up />
               </button>
-              <button onClick={() => move(i, 1)} disabled={i === rows.length - 1} aria-label="Ниже" className="w-11 shrink-0 rounded-lg border border-border bg-surface disabled:opacity-30">
-                ↓
+              <button
+                onClick={() => move(i, 1)}
+                disabled={i === rows.length - 1}
+                aria-label="Ниже"
+                className="w-11 shrink-0 rounded-md border border-border-strong bg-surface text-muted hover:border-accent hover:text-accent disabled:pointer-events-none disabled:opacity-30"
+              >
+                <Arrow />
               </button>
             </div>
           ))}
         </div>
       )}
 
-      {!!q.hints?.length && (
+      {!!q.hints?.length && !noHints && (
         <div className="space-y-2">
           {q.hints.slice(0, hints).map((h, i) => (
-            <div key={i} className="rounded-lg bg-warn-soft px-3 py-2 text-sm">
-              <span className="font-medium text-warn">Подсказка {i + 1}. </span>
+            <div key={i} className="enter rounded-r-md border-l-3 border-warn bg-warn-soft px-3 py-2 text-sm">
+              <span className="font-semibold text-warn">Подсказка {i + 1}. </span>
               <Markdown text={h} className="inline [&>p]:inline" />
             </div>
           ))}
           {hints < q.hints.length && (
             <Button small variant="ghost" onClick={() => setHints((n) => n + 1)}>
-              Показать подсказку ({hints + 1} из {q.hints.length})
+              Показать подсказку {hints + 1} из {q.hints.length}
             </Button>
           )}
         </div>
@@ -335,33 +438,24 @@ function ActiveQuestion({
 
       <div className="space-y-3 border-t border-border pt-4">
         <div>
-          <div className="mb-1.5 text-sm text-muted">Насколько уверен в ответе?</div>
-          <div className="grid grid-cols-3 gap-2">
-            {(
+          <div className="mb-1 text-[13px] text-muted">Насколько уверен в ответе?</div>
+          <Segmented
+            label="Уверенность"
+            value={confidence}
+            onChange={(v) => setConfidence(confidence === v ? null : v)}
+            options={
               [
                 [1, "Угадываю"],
                 [2, "Скорее да"],
                 [3, "Уверен"],
               ] as const
-            ).map(([v, label]) => (
-              <button
-                key={v}
-                onClick={() => setConfidence(confidence === v ? null : v)}
-                aria-pressed={confidence === v}
-                className={cx(
-                  "min-h-11 rounded-lg border px-2 text-sm transition-colors",
-                  confidence === v ? "border-accent bg-accent-soft font-medium text-accent" : "border-border bg-surface text-muted hover:bg-surface-2",
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+            }
+          />
         </div>
 
         {showThinking ? (
           <textarea
-            className={cx(inputClass, "min-h-20 resize-y")}
+            className={cx(inputClass, "enter min-h-20 resize-y")}
             placeholder="Мысли вслух: как рассуждал, в чём сомневаешься. Репетитор учтёт это."
             value={thinking}
             onChange={(e) => setThinking(e.target.value)}
@@ -369,26 +463,47 @@ function ActiveQuestion({
           />
         ) : (
           <Button small variant="ghost" onClick={() => setShowThinking(true)}>
-            + Мысли вслух
+            Добавить мысли вслух
           </Button>
         )}
 
-        {problem && <Notice tone="bad">{problem}</Notice>}
+        {problem && (
+          <div className="enter">
+            <Notice tone="bad">{problem}</Notice>
+          </div>
+        )}
 
-        <Button variant="primary" className="w-full sm:w-auto" disabled={!canSubmit} onClick={submit}>
-          {working === "submit" ? "Проверяю…" : q.kind === "code" || q.kind === "find_bug" ? "Проверить и ответить" : "Ответить"}
-        </Button>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Button variant="primary" className="w-full sm:w-auto" disabled={!canSubmit} onClick={submit}>
+            {working === "submit" ? "Проверяю…" : (submitLabel ?? (q.kind === "code" || q.kind === "find_bug" ? "Проверить и ответить" : "Ответить"))}
+          </Button>
+          <span className="hidden items-center gap-3 text-xs text-muted sm:flex" aria-hidden>
+            {q.kind === "choice" && (
+              <span>
+                <Kbd>1</Kbd>–<Kbd>{Math.min(order.length, 9)}</Kbd> выбрать
+              </span>
+            )}
+            <span>
+              <Kbd>Ctrl+Enter</Kbd> ответить
+            </span>
+            {hintsLeft > 0 && (
+              <span>
+                <Kbd>H</Kbd> подсказка
+              </span>
+            )}
+          </span>
+        </div>
       </div>
     </div>
   );
 }
 
-function AnsweredQuestion({ item }: { item: QItem }) {
+export function AnsweredQuestion({ item }: { item: QItem }) {
   const q = item.question;
   const a = item.answer;
   if (!a) return <div className="text-sm text-muted">Без ответа.</div>;
   return (
-    <div className="space-y-3">
+    <div className="appear space-y-3">
       {q.kind === "choice" && (
         <div className="space-y-1.5">
           {q.options!.map((o, i) => {
@@ -398,11 +513,13 @@ function AnsweredQuestion({ item }: { item: QItem }) {
               <div
                 key={i}
                 className={cx(
-                  "flex items-start gap-2 rounded-lg border px-3 py-2 text-sm",
-                  right ? "border-ok bg-ok-soft" : chosen ? "border-bad bg-bad-soft" : "border-border",
+                  "flex items-start gap-2 rounded-sm border px-2.5 py-1.5",
+                  right ? "border-ok/60 bg-ok-soft" : chosen ? "border-bad/60 bg-bad-soft" : "border-border",
                 )}
               >
-                <span className="w-4 shrink-0 font-medium">{right ? "✓" : chosen ? "✗" : ""}</span>
+                <span className={cx("mt-[3px] w-4 shrink-0", right ? "text-ok" : "text-bad")} aria-label={right ? "верный ответ" : chosen ? "неверно" : undefined}>
+                  {(right || chosen) && <Icon name={right ? "check" : "cross"} className="[stroke-width:1.8]" />}
+                </span>
                 <Markdown text={o} className="min-w-0 flex-1" />
                 {chosen && <span className="shrink-0 text-xs text-muted">твой ответ</span>}
               </div>
@@ -433,7 +550,7 @@ function AnsweredQuestion({ item }: { item: QItem }) {
         </>
       )}
       {(q.kind === "free" || q.kind === "math") && (
-        <div className="rounded-lg border border-border bg-surface-2 px-3 py-2">
+        <div className="rounded-md border border-border bg-surface-2 px-3 py-2">
           <div className="mb-1 text-xs text-muted">Твой ответ</div>
           <Markdown text={(a.text ?? "").replace(/\n/g, "  \n")} />
         </div>
@@ -441,7 +558,7 @@ function AnsweredQuestion({ item }: { item: QItem }) {
       {(a.hintsUsed || a.confidence) && (
         <div className="text-xs text-muted">
           {a.confidence ? `Уверенность: ${["угадывал", "скорее да", "уверен"][a.confidence - 1]}` : ""}
-          {a.confidence && a.hintsUsed ? " · " : ""}
+          {a.confidence && a.hintsUsed ? ", " : ""}
           {a.hintsUsed ? `подсказок: ${a.hintsUsed}` : ""}
         </div>
       )}
@@ -462,9 +579,16 @@ export function QuestionCard({
 }) {
   const q = item.question;
   return (
-    <section className={cx("rounded-xl border bg-surface p-4 sm:p-5", item.pending ? "border-accent" : "border-border")}>
+    // A notebook cell: the focused one has the accent bar, a finished one carries its result colour.
+    <section
+      className={cx(
+        "overflow-hidden rounded-sm border border-l-2 bg-bg transition-colors duration-300",
+        item.pending ? "attention border-accent" : cx("border-border", item.outcome ? OUTCOME[item.outcome].edge : "border-l-border-strong"),
+      )}
+    >
       <Header q={q} outcome={item.pending ? null : item.outcome} waiting={!item.pending && !item.outcome && !!item.answer} />
-      <Markdown text={q.prompt} className="mb-4" />
+      <div className="p-3 sm:p-4">
+      <Markdown text={q.prompt} className="mb-4 text-[15px] text-bright" />
       {item.pending ? (
         <ActiveQuestion
           key={item.attemptId}
@@ -476,6 +600,7 @@ export function QuestionCard({
       ) : (
         <AnsweredQuestion item={item} />
       )}
+      </div>
     </section>
   );
 }

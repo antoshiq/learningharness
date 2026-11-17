@@ -3,6 +3,7 @@ import path from "node:path";
 import { eq } from "drizzle-orm";
 import { SECRETS_FILE } from "./paths";
 import { getDb, schema } from "./db";
+import { spentSince, startOfDay } from "./stats";
 import type { AppConfig, ProviderId, RoleConfig } from "@/lib/types";
 
 interface Secrets {
@@ -70,6 +71,13 @@ export function getRoles(): AppConfig["roles"] {
 
 export const getCustomBaseUrl = () => getSetting<string>("customBaseUrl", "");
 
+/** Daily spending cap in USD; null means no cap. */
+export const getDailyLimit = () => getSetting<number | null>("dailyLimit", null);
+
+/** Answers per day the learner aims for (lessons and practice together). */
+export const DEFAULT_GOAL = 10;
+export const getDailyGoal = () => getSetting<number>("dailyGoal", DEFAULT_GOAL);
+
 export function getConfig(): AppConfig {
   return {
     roles: getRoles(),
@@ -81,6 +89,9 @@ export function getConfig(): AppConfig {
       customKey: !!apiKey("custom"),
     },
     mockEnabled: mockEnabled(),
+    dailyLimit: getDailyLimit(),
+    spentToday: spentSince(startOfDay()),
+    dailyGoal: getDailyGoal(),
   };
 }
 
@@ -90,7 +101,20 @@ export function updateConfig(patch: {
   roles?: Partial<AppConfig["roles"]>;
   customBaseUrl?: string;
   keys?: Secrets;
+  dailyLimit?: number | null;
+  dailyGoal?: number;
 }) {
+  if (patch.dailyGoal !== undefined) {
+    const g = Math.round(Number(patch.dailyGoal));
+    if (!Number.isFinite(g) || g < 1 || g > 500) throw new Error("Цель — от 1 до 500 ответов в день");
+    setSetting("dailyGoal", g);
+  }
+  if (patch.dailyLimit !== undefined) {
+    const v = patch.dailyLimit;
+    if (v !== null && (typeof v !== "number" || !Number.isFinite(v) || v <= 0 || v > 10_000)) throw new Error("Лимит должен быть положительным числом долларов");
+    if (v === null) getDb().delete(schema.settings).where(eq(schema.settings.key, "dailyLimit")).run();
+    else setSetting("dailyLimit", Math.round(v * 100) / 100);
+  }
   if (patch.roles) {
     const next = { ...getRoles() };
     for (const r of ["strong", "cheap"] as const) {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Card, inputClass, Notice } from "@/components/ui";
+import { Button, Card, inputClass, Logo, Notice } from "@/components/ui";
 import { api } from "@/lib/api";
 
 export default function LoginPage() {
@@ -26,11 +26,14 @@ export default function LoginPage() {
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-sm flex-col justify-center px-4">
-      <Card>
+      <Card className="sm:p-7">
         <form onSubmit={submit} className="space-y-4">
           <div>
-            <h1 className="text-lg font-semibold">Репетитор</h1>
-            <p className="mt-1 text-sm text-muted">Введи пароль из окна запуска на компьютере (start-lan.cmd).</p>
+            <Logo size={32} />
+            <h1 className="mt-3 text-[22px] leading-tight font-normal text-bright">Репетитор</h1>
+            <p className="mt-1.5 text-sm text-muted">
+              Пароль показан в окне запуска на компьютере, там, где открыт <code className="rounded-sm bg-code px-1 py-px font-mono text-xs">start-lan.cmd</code>.
+            </p>
           </div>
           <input
             type="password"
@@ -46,7 +49,7 @@ export default function LoginPage() {
           {error && <Notice tone="bad">{error}</Notice>}
           <button type="submit" className="hidden" />
           <Button variant="primary" className="w-full" disabled={busy || !password} onClick={(e) => submit(e)}>
-            Войти
+            {busy ? "Вхожу…" : "Войти"}
           </Button>
         </form>
       </Card>

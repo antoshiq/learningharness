@@ -46,3 +46,7 @@ next-env.d.ts
 
 /public/pyodide/
 
+
+# playwright
+/test-results/
+/playwright-report/

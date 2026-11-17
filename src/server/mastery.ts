@@ -62,17 +62,24 @@ export function applyAttempt(db: Db, attemptId: number, now = new Date()): strin
     // Diagnostics only promote: a confident correct answer marks the node as known.
     if (a.outcome !== "correct" || a.confidence === 1 || node.status === "mastered") return null;
   }
-  const rating = ratingFor(a.outcome, a.hintsUsed, a.confidence);
+  return applyRating(db, node, a.outcome, a.hintsUsed, a.confidence, now);
+}
+
+type NodeRow = typeof schema.nodes.$inferSelect;
+
+/** Move a node's FSRS card and status by one graded answer. */
+export function applyRating(db: Db, node: NodeRow, outcome: Outcome, hintsUsed: number, confidence: number | null, now = new Date()): string | null {
+  const rating = ratingFor(outcome, hintsUsed, confidence);
   if (rating === null) return null;
   const { card, dueAt } = schedule(node.card ?? null, rating, now);
-  const status = nextStatus(node.status, a.outcome);
+  const status = nextStatus(node.status, outcome);
   db.update(schema.nodes)
     .set({
       card,
       dueAt,
       status,
-      correctCount: node.correctCount + (a.outcome === "correct" ? 1 : 0),
-      wrongCount: node.wrongCount + (a.outcome === "wrong" ? 1 : 0),
+      correctCount: node.correctCount + (outcome === "correct" ? 1 : 0),
+      wrongCount: node.wrongCount + (outcome === "wrong" ? 1 : 0),
     })
     .where(eq(schema.nodes.id, node.id))
     .run();

@@ -15,6 +15,48 @@
       "when": 1794683182442,
       "tag": "0001_unknown_dust",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794934110610,
+      "tag": "0002_practice_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1794938355739,
+      "tag": "0003_briefs",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1794942479846,
+      "tag": "0004_cards_chats",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1794946374195,
+      "tag": "0005_topic_files",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1794947621016,
+      "tag": "0006_brief_materials",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1794948860462,
+      "tag": "0007_explain_plans",
+      "breakpoints": true
     }
   ]
 }

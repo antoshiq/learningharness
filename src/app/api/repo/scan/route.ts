@@ -1,6 +1,7 @@
 import { getRoles } from "@/server/config";
 import { handle, json } from "@/server/http";
 import { inputPrice } from "@/server/llm/pricing";
+import { resolveRepo } from "@/server/git";
 import { scanRepo } from "@/server/repo/scan";
 
 /** Preview what the agent would be able to read, and what reading it all would cost. */
@@ -8,9 +9,11 @@ export const POST = (req: Request) =>
   handle(async () => {
     const { path: p } = (await req.json()) as { path?: string };
     if (!p?.trim()) throw new Error("Укажи путь к папке");
+    // A GitHub link is downloaded first, so the estimate is for the real files.
+    const { root } = await resolveRepo(p);
     let scan;
     try {
-      scan = scanRepo(p.trim());
+      scan = scanRepo(root);
     } catch (e) {
       throw new Error(`Не удалось прочитать папку: ${e instanceof Error ? e.message : e}`);
     }

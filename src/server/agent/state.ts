@@ -4,6 +4,7 @@ import { schema } from "../db";
 import { isAvailable } from "@/lib/plan";
 import type { NodeStatus, PlanNodeView } from "@/lib/types";
 import { getScan, renderTree } from "../repo/scan";
+import { materialsText } from "../materials";
 
 /** Text blocks with these prefixes are context for the model and are hidden from the learner. */
 export const STATE_PREFIX = "[состояние]";
@@ -112,6 +113,19 @@ export function initialState(db: Db, sessionId: number): string {
   if (parked.length) {
     out.push("", "Вопросы, которые ученик отложил «на парковку» (можно ответить, когда уместно):");
     for (const p of parked) out.push(`- ${p.text}`);
+  }
+
+  const materials = materialsText(topic.id);
+  if (materials) {
+    out.push(
+      "",
+      "Материалы, которые приложил ученик. Учи по ним: план, объяснения и вопросы строй на их содержании и терминах, ссылайся на них; чего в них нет, добавляй, только если это нужно для понимания:",
+      materials,
+    );
+  }
+
+  if (topic.brief && topic.brief !== topic.repoMap) {
+    out.push("", "Ученик уже прочитал краткий экскурс по теме. Опирайся на него, но знания всё равно проверь диагностикой:", topic.brief.slice(0, 8000));
   }
 
   if (topic.kind === "repo" && topic.repoPath) {

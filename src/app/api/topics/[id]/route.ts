@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { planView } from "@/server/agent/state";
 import { getDb, schema } from "@/server/db";
 import { handle, intParam, json } from "@/server/http";
+import { listMaterials } from "@/server/materials";
 import { usageTotals } from "@/server/sessions";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -62,6 +63,7 @@ export const GET = (_req: Request, ctx: Ctx) =>
       sessions,
       mistakes,
       calibration,
+      materials: listMaterials(id),
       parking: db.select().from(schema.parking).where(eq(schema.parking.topicId, id)).orderBy(desc(schema.parking.id)).all(),
       usage: usageTotals({ topicId: id }),
     });
@@ -78,9 +80,14 @@ export const DELETE = (_req: Request, ctx: Ctx) =>
         tx.delete(schema.usage).where(inArray(schema.usage.sessionId, ids)).run();
       }
       tx.delete(schema.attempts).where(eq(schema.attempts.topicId, id)).run();
+      tx.delete(schema.drills).where(eq(schema.drills.topicId, id)).run();
+      tx.delete(schema.cards).where(eq(schema.cards.topicId, id)).run();
+      tx.delete(schema.topicFiles).where(eq(schema.topicFiles.topicId, id)).run();
+      tx.delete(schema.explanations).where(eq(schema.explanations.topicId, id)).run();
       tx.delete(schema.parking).where(eq(schema.parking.topicId, id)).run();
       tx.delete(schema.sessions).where(eq(schema.sessions.topicId, id)).run();
       tx.delete(schema.nodes).where(eq(schema.nodes.topicId, id)).run();
+      tx.update(schema.briefs).set({ topicId: null }).where(eq(schema.briefs.topicId, id)).run();
       tx.delete(schema.topics).where(eq(schema.topics.id, id)).run();
     });
     return json({ ok: true });

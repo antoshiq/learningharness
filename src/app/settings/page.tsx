@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Badge, Button, Card, cx, inputClass, Notice, Page, TopNav } from "@/components/ui";
+import { Badge, Button, Card, cx, inputClass, Loading, Notice, Page, TopNav } from "@/components/ui";
+import { AppearanceCard, DataCard, GoalCard, LimitCard } from "@/components/SettingsExtras";
 import { api } from "@/lib/api";
 import type { AppConfig, ProviderId, RoleConfig } from "@/lib/types";
 
@@ -30,7 +31,7 @@ function KeyField({ label, saved, hint, onSave }: { label: string; saved: boolea
   return (
     <div>
       <div className="mb-1.5 flex items-center gap-2 text-sm">
-        <span className="font-medium">{label}</span>
+        <span className="text-bright">{label}</span>
         {saved ? <Badge tone="ok">ключ сохранён</Badge> : <Badge>нет ключа</Badge>}
       </div>
       <div className="flex gap-2">
@@ -92,7 +93,7 @@ function RoleEditor({
   return (
     <div className="space-y-2.5">
       <div>
-        <div className="font-medium">{title}</div>
+        <div className="text-bright">{title}</div>
         <div className="text-sm text-muted">{hint}</div>
       </div>
       <div className="grid gap-2 sm:grid-cols-[200px_1fr]">
@@ -193,20 +194,21 @@ export default function SettingsPage() {
 
   return (
     <>
-      <TopNav back={{ href: "/", label: "Темы" }} title="Настройки" />
+      <TopNav tab="Настройки" icon="gear" crumbs={[{ label: "Настройки" }]} />
       <Page narrow>
+        <h1 className="mb-6 text-[26px] leading-tight font-normal text-bright">Настройки</h1>
         {error && <Notice tone="bad">{error}</Notice>}
         {!cfg ? (
-          <div className="text-sm text-muted">Загрузка…</div>
+          <Loading />
         ) : (
-          <div className="space-y-5">
+          <div className="space-y-6">
             {cfg.mockEnabled && <Notice tone="warn">Включён тестовый режим (TUTOR_MOCK=1): вместо настоящей модели отвечает сценарий-заглушка.</Notice>}
 
             <Card className="space-y-5">
               <div>
-                <h2 className="text-lg font-semibold">Ключи доступа</h2>
+                <h2 className="text-[15px] font-semibold text-bright">Ключи доступа</h2>
                 <p className="mt-1 text-sm text-muted">
-                  Ключи хранятся в файле <code className="font-mono text-[13px]">.tutor/secrets.json</code> в твоей домашней папке, вне проекта, и никогда не
+                  Ключи хранятся в файле <code className="rounded-sm bg-code px-1 py-px font-mono text-xs text-text">.tutor/secrets.json</code> в твоей домашней папке, вне проекта, и никогда не
                   показываются в браузере. Отправляются они только выбранному провайдеру.
                 </p>
               </div>
@@ -216,7 +218,7 @@ export default function SettingsPage() {
 
             <Card className="space-y-4">
               <div>
-                <h2 className="text-lg font-semibold">Свой сервер</h2>
+                <h2 className="text-[15px] font-semibold text-bright">Свой сервер</h2>
                 <p className="mt-1 text-sm text-muted">
                   Любой адрес, совместимый с OpenAI API: локальные Ollama и LM Studio или другой провайдер. Модель должна поддерживать вызов инструментов (tool
                   calling), иначе уроки работать не будут.
@@ -241,14 +243,14 @@ export default function SettingsPage() {
             </Card>
 
             <Card className="space-y-3">
-              <h2 className="text-lg font-semibold">Подписка Claude</h2>
+              <h2 className="text-[15px] font-semibold text-bright">Подписка Claude</h2>
               <p className="text-sm text-muted">
                 Можно учиться на подписке Claude (Pro или Max) без API-ключа. Приложение запускает программу Claude Code, установленную на этом компьютере, под твоим
                 входом. Ключ или пароль от аккаунта приложению не нужны и нигде в нём не хранятся.
               </p>
               <ol className="list-decimal space-y-1 pl-5 text-sm text-muted">
                 <li>
-                  Открой терминал, запусти <code className="font-mono text-[13px]">claude</code> и войди командой <code className="font-mono text-[13px]">/login</code>, если ещё не
+                  Открой терминал, запусти <code className="rounded-sm bg-code px-1 py-px font-mono text-xs text-text">claude</code> и войди командой <code className="rounded-sm bg-code px-1 py-px font-mono text-xs text-text">/login</code>, если ещё не
                   входил.
                 </li>
                 <li>Ниже, в «Моделях», выбери «Подписка Claude» и модель: opus, sonnet или haiku.</li>
@@ -261,7 +263,7 @@ export default function SettingsPage() {
             </Card>
 
             <Card className="space-y-6">
-              <h2 className="text-lg font-semibold">Модели</h2>
+              <h2 className="text-[15px] font-semibold text-bright">Модели</h2>
               <RoleEditor
                 key={`strong-${cfg.roles.strong.provider}-${cfg.roles.strong.model}`}
                 name="strong"
@@ -280,11 +282,16 @@ export default function SettingsPage() {
               />
             </Card>
 
+            <GoalCard key={`goal-${cfg.dailyGoal}`} cfg={cfg} put={put} />
+            <LimitCard key={String(cfg.dailyLimit)} cfg={cfg} put={put} />
+            <AppearanceCard />
+            <DataCard />
+
             <Card className="space-y-2">
-              <h2 className="text-lg font-semibold">Доступ с телефона</h2>
+              <h2 className="text-[15px] font-semibold text-bright">Доступ с телефона</h2>
               <p className="text-sm text-muted">
-                Запусти на компьютере <code className="font-mono text-[13px]">start-lan.cmd</code> вместо <code className="font-mono text-[13px]">start.cmd</code>. В
-                окне появится адрес вида <code className="font-mono text-[13px]">http://192.168.x.x:3000</code> и пароль. Телефон должен быть в той же сети Wi-Fi.
+                Запусти на компьютере <code className="rounded-sm bg-code px-1 py-px font-mono text-xs text-text">start-lan.cmd</code> вместо <code className="rounded-sm bg-code px-1 py-px font-mono text-xs text-text">start.cmd</code>. В
+                окне появится адрес вида <code className="rounded-sm bg-code px-1 py-px font-mono text-xs text-text">http://192.168.x.x:3000</code> и пароль. Телефон должен быть в той же сети Wi-Fi.
                 Компьютер при этом должен оставаться включённым.
               </p>
             </Card>
