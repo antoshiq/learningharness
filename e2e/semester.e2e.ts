@@ -5,6 +5,8 @@ import { expect, test, type Page } from "@playwright/test";
 test.describe.configure({ mode: "serial" });
 
 let page: Page;
+/** The semester made by the first test. */
+let semesterUrl = "";
 test.beforeAll(async ({ browser }) => {
   page = await browser.newPage();
 });
@@ -45,6 +47,7 @@ test("builds a program from a PDF textbook and lets it be edited", async () => {
   await expect(page.getByLabel("Роль файла book.pdf")).toHaveValue("main");
   await page.getByRole("button", { name: "Составить программу" }).click();
   await expect(page).toHaveURL(/\/semester\/\d+$/);
+  semesterUrl = page.url();
   await expect(page.getByText("Проверь программу")).toBeVisible({ timeout: 60_000 });
   // Sections are tied to book pages; front matter is not offered.
   await expect(page.getByText(/book\.pdf · стр\. \d/).first()).toBeVisible();
@@ -82,4 +85,39 @@ test("the module's topic links back to the semester", async () => {
   await row.getByRole("link", { name: "Модуль", exact: true }).click();
   await expect(page).toHaveURL(/\/topics\/\d+$/);
   await expect(page.getByText(/Модуль 1 семестра «.+» · сдан/)).toBeVisible();
+});
+
+test("a scanned book is recognized on the server and its pages can be viewed", async () => {
+  await page.goto(semesterUrl);
+  await page.locator("input[type=file]").setInputFiles(path.join(__dirname, "..", "tests", "fixtures", "scan.pdf"));
+  await page.getByRole("button", { name: /Добавить 1 файл/ }).click();
+  const row = page.getByRole("listitem").filter({ hasText: "scan.pdf" });
+  // Recognized by Tesseract in the production build, then outlined.
+  await expect(row.getByRole("link", { name: "Открыть" })).toBeVisible({ timeout: 90_000 });
+  await row.getByRole("link", { name: "Открыть" }).click();
+  await expect(page).toHaveURL(/\/book\/\d+/);
+  await expect(page.locator("canvas")).toBeVisible();
+  await page.getByRole("button", { name: "Текст" }).click();
+  await expect(page.getByText(/Глава 1\. Множества/).last()).toBeVisible();
+});
+
+test("an oral exam on a module, answered in text", async () => {
+  await page.goto(semesterUrl);
+  const row = page.getByRole("listitem").filter({ hasText: "Множества и отображения" });
+  await row.getByRole("link", { name: "Модуль", exact: true }).click();
+  await page.getByRole("link", { name: /Устный экзамен/ }).click();
+  await page.getByRole("button", { name: /Начать экзамен/ }).click();
+  for (const a of ["Множество — совокупность объектов.", "Объединение содержит элементы обоих множеств."]) {
+    await page.getByPlaceholder(/Говорить|Твой ответ/).fill(a);
+    await page.getByRole("button", { name: "Ответить", exact: true }).click();
+  }
+  await expect(page.getByText("Экзамен закончен")).toBeVisible();
+  await expect(page.getByText("80%")).toBeVisible();
+});
+
+test("the course map shows the semester's ideas", async () => {
+  await page.goto(semesterUrl);
+  await page.getByRole("link", { name: /Карта курса/ }).click();
+  await expect(page.getByRole("heading", { name: "Карта курса" })).toBeVisible();
+  await expect(page.getByText(/всего \d+ иде/)).toBeVisible();
 });
