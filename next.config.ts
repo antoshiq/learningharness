@@ -4,7 +4,8 @@ import type { NextConfig } from "next";
 const allowedDevOrigins = (process.env.TUTOR_ALLOWED_ORIGINS ?? "").split(",").filter(Boolean);
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["better-sqlite3", "@anthropic-ai/claude-agent-sdk"],
+  // tesseract.js starts its worker thread from its own files, so it is not bundled.
+  serverExternalPackages: ["better-sqlite3", "@anthropic-ai/claude-agent-sdk", "tesseract.js", "tesseract.js-core", "@tesseract.js-data/rus", "@tesseract.js-data/eng"],
   allowedDevOrigins,
   devIndicators: false,
   experimental: {

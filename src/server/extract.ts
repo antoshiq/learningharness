@@ -7,6 +7,9 @@ const MAX_PAGE_BYTES = 5 * 1024 * 1024;
 
 export const isPdf = (buf: Uint8Array) => buf.length > 4 && buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46; // %PDF
 
+/** Scanned pages recognized on the spot (a request, not a background job), at most this many. */
+const MAX_OCR_PAGES = 60;
+
 export async function pdfText(buf: Uint8Array): Promise<{ text: string; pages: number }> {
   if (buf.length > MAX_PDF_BYTES) throw new Error("PDF больше 30 МБ");
   const { getDocumentProxy, extractText } = await import("unpdf");
@@ -17,9 +20,16 @@ export async function pdfText(buf: Uint8Array): Promise<{ text: string; pages: n
     throw new Error(`Не удалось открыть PDF: ${e instanceof Error ? e.message : e}`);
   }
   const r = await extractText(doc, { mergePages: false });
-  const pages = (r.text as string[]).map((t, i) => `[стр. ${i + 1}]\n${t.replace(/[ \t]+\n/g, "\n").trim()}`);
-  const text = pages.join("\n\n").trim();
-  if (text.replace(/\[стр\. \d+\]/g, "").trim().length < 20) throw new Error("В PDF нет текстового слоя (похоже на скан): извлечь текст не получилось.");
+  const raw = (r.text as string[]).map((t) => t.replace(/[ \t]+\n/g, "\n").trim());
+  // Scanned pages (no text layer) are read by OCR, which needs no model.
+  const { looksScanned, ocrPdfPage } = await import("./ocr");
+  const scanned = raw.map((t, i) => (looksScanned(t) ? i : -1)).filter((i) => i >= 0);
+  if (scanned.length > MAX_OCR_PAGES) {
+    throw new Error(`В PDF ${scanned.length} страниц-сканов: здесь распознаются до ${MAX_OCR_PAGES}. Длинный скан загрузи в «Семестр» — там книга распознаётся в фоне целиком.`);
+  }
+  for (const i of scanned) raw[i] = await ocrPdfPage(doc, i + 1).catch(() => "");
+  const text = raw.map((t, i) => `[стр. ${i + 1}]\n${t}`).join("\n\n").trim();
+  if (text.replace(/\[стр\. \d+\]/g, "").trim().length < 20) throw new Error("В PDF не удалось найти текст: ни текстового слоя, ни читаемых сканов.");
   return { text, pages: r.totalPages };
 }
 

@@ -2,7 +2,7 @@
 // editor and the view of a semester for its page.
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { LEVELS } from "@/lib/semester";
-import { deleteBook, outlineBook, storeBook } from "../books";
+import { deleteBook, ocrBook, outlineBook, storeBook } from "../books";
 import { getDb, schema } from "../db";
 import type { BookRole, ProgramSection, SemesterLevel } from "../db/schema";
 import { isJobRunning, startJob } from "../jobs";
@@ -126,6 +126,20 @@ function setStep(id: number, step: string | null) {
 async function outlinePending(semesterId: number): Promise<number[]> {
   const done: number[] = [];
   const db = getDb();
+  // Scanned books are recognized first, page by page (no model needed).
+  const scans = db
+    .select()
+    .from(schema.books)
+    .where(and(eq(schema.books.semesterId, semesterId), eq(schema.books.status, "ocr")))
+    .orderBy(asc(schema.books.id))
+    .all();
+  for (const b of scans) {
+    try {
+      await ocrBook(b.id, (done, total) => setStep(semesterId, `«${b.name}»: распознаю сканы, страница ${done + 1} из ${total}`));
+    } catch (e) {
+      db.update(schema.books).set({ status: "error", error: e instanceof Error ? e.message : String(e) }).where(eq(schema.books.id, b.id)).run();
+    }
+  }
   const pending = db
     .select()
     .from(schema.books)
@@ -305,7 +319,10 @@ export interface BookView {
   role: BookRole;
   format: "pdf" | "text";
   pages: number;
-  status: "reading" | "outlining" | "ready" | "error";
+  status: "reading" | "ocr" | "outlining" | "ready" | "error";
+  /** Scanned pages: how many to recognize and how many are done. */
+  ocrTotal: number;
+  ocrDone: number;
   outlineSource: string | null;
   error: string | null;
   sections: number;
@@ -353,6 +370,8 @@ export function bookViews(semesterId: number): BookView[] {
       format: b.format,
       pages: b.pages,
       status: b.status,
+      ocrTotal: b.ocrTotal,
+      ocrDone: b.ocrDone,
       outlineSource: b.outlineSource,
       error: b.error,
       sections: counts.get(b.id) ?? 0,
@@ -380,7 +399,7 @@ export function resumeIfStalled(semesterId: number) {
   const outlining = db
     .select({ id: schema.books.id })
     .from(schema.books)
-    .where(and(eq(schema.books.semesterId, semesterId), eq(schema.books.status, "outlining")))
+    .where(and(eq(schema.books.semesterId, semesterId), inArray(schema.books.status, ["outlining", "ocr"])))
     .get();
   if (sem.status === "preparing" && sem.step !== null) startPreparation(semesterId);
   else if (sem.status !== "preparing" && outlining) startPreparation(semesterId);

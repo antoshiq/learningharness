@@ -15,7 +15,11 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { isServiceTitle, ROLE_LABEL } from "./book-read";
 import { getDb, schema } from "./db";
 import type { BookRole, OutlineSource } from "./db/schema";
+import fs from "node:fs";
+import path from "node:path";
 import { isPdf } from "./extract";
+import { looksScanned, ocrPdfPage } from "./ocr";
+import { DATA_DIR } from "./paths";
 import { chatAs } from "./llm";
 import { isText } from "./llm/types";
 
@@ -60,10 +64,8 @@ export async function readPdf(buf: Uint8Array): Promise<{ pages: string[]; bookm
     throw new Error(`Не удалось открыть PDF: ${e instanceof Error ? e.message : e}`);
   }
   const r = await extractText(doc, { mergePages: false });
-  const pages = (r.text as string[]).map(clean);
-  if (pages.join("").replace(/\s/g, "").length < pages.length * 20) {
-    throw new Error("В PDF почти нет текстового слоя (похоже на скан). Нужен PDF с текстом: распознай его (OCR) и загрузи снова.");
-  }
+  // Pages without a text layer (scans) stay empty here; OCR fills them in later.
+  const pages = (r.text as string[]).map(clean).map((t) => (looksScanned(t) ? "" : t));
 
   const bookmarks: OutlineEntry[] = [];
   try {
@@ -344,6 +346,9 @@ export interface BookInput {
 }
 
 /** First step: read the file and store its pages. Fast and model-free; the outline comes later. */
+/** Where a book's original file is kept. */
+export const bookFile = (id: number, format: "pdf" | "text") => path.join(DATA_DIR, "books", `${id}.${format === "pdf" ? "pdf" : "txt"}`);
+
 export async function storeBook(input: BookInput): Promise<{ id: number; bookmarks: OutlineEntry[] }> {
   if (input.data.length > MAX_BOOK_BYTES) throw new Error(`${input.name} больше 100 МБ.`);
   const name = input.name.replace(/[\\/]/g, "_").slice(0, 200) || "книга";
@@ -363,6 +368,7 @@ export async function storeBook(input: BookInput): Promise<{ id: number; bookmar
     format = "text";
   }
   if (!pages.length) throw new Error(`${name}: в файле нет текста.`);
+  const scanned = pages.filter((p) => !p).length;
 
   const db = getDb();
   const id = db.transaction((tx) => {
@@ -375,7 +381,9 @@ export async function storeBook(input: BookInput): Promise<{ id: number; bookmar
         format,
         pages: pages.length,
         chars: pages.reduce((n, p) => n + p.length, 0),
-        status: "outlining",
+        // Scanned pages are recognized before the outline is looked for.
+        status: scanned ? "ocr" : "outlining",
+        ocrTotal: scanned,
         bookmarks,
         createdAt: Date.now(),
       })
@@ -383,12 +391,65 @@ export async function storeBook(input: BookInput): Promise<{ id: number; bookmar
       .get();
     for (let i = 0; i < pages.length; i += 200) {
       tx.insert(schema.bookPages)
-        .values(pages.slice(i, i + 200).map((text, k) => ({ bookId: row.id, page: i + k + 1, text })))
+        .values(pages.slice(i, i + 200).map((text, k) => ({ bookId: row.id, page: i + k + 1, text, ocr: text ? 0 : 1 })))
         .run();
     }
     return row.id;
   });
+  // The original stays on disk: the page viewer shows it and OCR reads its pictures.
+  const file = bookFile(id, format);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, input.data);
+  db.update(schema.books).set({ file: path.basename(file) }).where(eq(schema.books.id, id)).run();
   return { id, bookmarks };
+}
+
+/**
+ * Recognize the scanned pages of a book, one page at a time, saving each as it
+ * is done: interrupted work goes on from where it stopped. Then the book goes on
+ * to the outline step.
+ */
+export async function ocrBook(bookId: number, onProgress?: (done: number, total: number) => void): Promise<void> {
+  const db = getDb();
+  const book = db.select().from(schema.books).where(eq(schema.books.id, bookId)).get();
+  if (!book) throw new Error("Книга не найдена");
+  const waiting = db
+    .select({ id: schema.bookPages.id, page: schema.bookPages.page })
+    .from(schema.bookPages)
+    .where(and(eq(schema.bookPages.bookId, bookId), eq(schema.bookPages.ocr, 1)))
+    .orderBy(asc(schema.bookPages.page))
+    .all();
+  if (waiting.length) {
+    if (!book.file) throw new Error("Исходный файл книги не сохранился: загрузи её заново.");
+    const { getDocumentProxy } = await import("unpdf");
+    const doc = await getDocumentProxy(new Uint8Array(fs.readFileSync(path.join(DATA_DIR, "books", book.file))));
+    let done = book.ocrTotal - waiting.length;
+    for (const w of waiting) {
+      onProgress?.(done, book.ocrTotal);
+      let text = "";
+      try {
+        text = clean(await ocrPdfPage(doc, w.page));
+      } catch {
+        // A page that cannot be read stays empty; the rest of the book is still useful.
+      }
+      done++;
+      db.transaction((tx) => {
+        tx.update(schema.bookPages).set({ text, ocr: 2 }).where(eq(schema.bookPages.id, w.id)).run();
+        tx.update(schema.books).set({ ocrDone: done }).where(eq(schema.books.id, bookId)).run();
+      });
+    }
+    await doc.destroy();
+  }
+  const chars = db
+    .select({ n: sql<number>`coalesce(sum(length(${schema.bookPages.text})), 0)` })
+    .from(schema.bookPages)
+    .where(eq(schema.bookPages.bookId, bookId))
+    .get()!.n;
+  if (chars < 200) {
+    db.update(schema.books).set({ status: "error", error: "Не удалось распознать текст: страницы пустые или слишком плохого качества.", chars }).where(eq(schema.books.id, bookId)).run();
+    return;
+  }
+  db.update(schema.books).set({ status: "outlining", chars }).where(eq(schema.books.id, bookId)).run();
 }
 
 export function bookPagesText(bookId: number): string[] {
@@ -445,6 +506,8 @@ export async function outlineBook(bookId: number, onStep?: (text: string) => voi
 
 export function deleteBook(bookId: number) {
   const db = getDb();
+  const book = db.select({ file: schema.books.file }).from(schema.books).where(eq(schema.books.id, bookId)).get();
+  if (book?.file) fs.rmSync(path.join(DATA_DIR, "books", book.file), { force: true });
   db.transaction((tx) => {
     tx.delete(schema.bookSections).where(eq(schema.bookSections.bookId, bookId)).run();
     tx.delete(schema.bookPages).where(eq(schema.bookPages.bookId, bookId)).run();

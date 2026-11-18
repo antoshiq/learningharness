@@ -177,3 +177,18 @@ describe("books added to a draft", () => {
     expect(v.modules.map((m) => m.title)).toEqual(before);
   });
 });
+
+describe("a scanned textbook", () => {
+  it("is recognized before the program is built", { timeout: 120_000 }, async () => {
+    const id = sem.createSemester({ request: "Основы анализа", level: "base", weeks: 4, hoursPerWeek: 4 });
+    const data = new Uint8Array(fs.readFileSync(path.join(__dirname, "fixtures", "scan.pdf")));
+    await sem.addBook(id, "скан.pdf", "main", data);
+    expect(sem.getSemesterView(id).books[0]).toMatchObject({ status: "ocr", ocrTotal: 2, ocrDone: 0 });
+    sem.startPreparation(id);
+    await jobs.waitJob(`semester:${id}`);
+    const v = sem.getSemesterView(id);
+    expect(v.error).toBeNull();
+    expect(v.status).toBe("draft");
+    expect(v.books[0]).toMatchObject({ status: "ready", ocrDone: 2 });
+  });
+});

@@ -190,3 +190,32 @@ describe("printed table of contents", () => {
     ]);
   });
 });
+
+describe("scanned books", () => {
+  it("are recognized page by page, kept on disk and searchable", { timeout: 120_000 }, async () => {
+    const data = new Uint8Array(fs.readFileSync(path.join(__dirname, "fixtures", "scan.pdf")));
+    const { id } = await books.storeBook({ semesterId: null, name: "скан.pdf", role: "main", data });
+    const db = (await import("@/server/db")).getDb();
+    const { schema } = await import("@/server/db");
+    const { eq } = await import("drizzle-orm");
+    let row = db.select().from(schema.books).where(eq(schema.books.id, id)).get()!;
+    expect(row).toMatchObject({ status: "ocr", ocrTotal: 2, ocrDone: 0 });
+    expect(fs.existsSync(path.join(dir, "books", row.file!))).toBe(true);
+
+    const seen: number[] = [];
+    await books.ocrBook(id, (done) => seen.push(done));
+    row = db.select().from(schema.books).where(eq(schema.books.id, id)).get()!;
+    expect(seen).toEqual([0, 1]);
+    expect(row).toMatchObject({ status: "outlining", ocrDone: 2 });
+    // Headings are found in the recognized text (two chapters are too few for an outline of their own).
+    expect(books.headingsOutline(books.bookPagesText(id)).map((h) => [h.title, h.page])).toEqual([
+      ["Глава 1. Множества", 1],
+      ["Глава 2. Пределы", 2],
+    ]);
+    await books.outlineBook(id);
+    expect(books.searchBooks([id], "последовательности")[0].page).toBe(2);
+
+    books.deleteBook(id);
+    expect(fs.existsSync(path.join(dir, "books", row.file!))).toBe(false);
+  });
+});

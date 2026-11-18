@@ -38,6 +38,11 @@ function BookRow({ b, semesterId, editable, onChange }: { b: BookView; semesterI
         <span className="text-xs text-muted">
           {b.pages} {b.format === "pdf" ? "стр." : plural(b.pages, "фрагмент", "фрагмента", "фрагментов")}
         </span>
+        {b.status === "ocr" && (
+          <Badge tone="warn">
+            <Dots /> распознаю сканы: {b.ocrDone} из {b.ocrTotal}
+          </Badge>
+        )}
         {b.status === "outlining" && (
           <Badge tone="warn">
             <Dots /> размечаю
@@ -158,7 +163,8 @@ function Preparing({ s, failed, onChange }: { s: SemesterView; failed: string | 
         </div>
       )}
       <p className="text-xs text-muted">
-        Страницу можно закрыть: подготовка идёт на сервере. Толстая книга без закладок размечается дольше — модель просматривает начало каждой страницы.
+        Страницу можно закрыть: подготовка идёт на сервере. Толстая книга без закладок размечается дольше — модель просматривает начало каждой страницы. Сканы
+        распознаются прямо на сервере, без модели: примерно 1–5 секунд на страницу, в зависимости от компьютера.
       </p>
     </Card>
   );
@@ -171,7 +177,7 @@ function Draft({ s, onChange }: { s: SemesterView; onChange: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const over = s.programHours > s.capacityHours * 1.15;
   const regular = s.modules.filter((m) => m.kind === "regular");
-  const unread = s.books.some((b) => b.status === "outlining");
+  const unread = s.books.some((b) => b.status === "outlining" || b.status === "ocr");
 
   const act = async (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -279,7 +285,7 @@ export default function SemesterPage() {
   }, [load]);
 
   // While the server works, keep the page fresh.
-  const working = !!s && (s.running || (s.status === "preparing" && !s.error) || s.books.some((b) => b.status === "outlining") || !!s.active?.preparing);
+  const working = !!s && (s.running || (s.status === "preparing" && !s.error) || s.books.some((b) => b.status === "outlining" || b.status === "ocr") || !!s.active?.preparing);
   useEffect(() => {
     if (!working) return;
     const t = setInterval(load, 2000);

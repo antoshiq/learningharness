@@ -281,7 +281,7 @@ export const studyPlans = sqliteTable("study_plans", {
 // ---------------------------------------------------------------------------
 
 export type BookRole = "main" | "problems" | "lectures" | "extra";
-export type BookStatus = "reading" | "outlining" | "ready" | "error";
+export type BookStatus = "reading" | "ocr" | "outlining" | "ready" | "error";
 /** Where the table of contents came from, from the most to the least reliable. */
 export type OutlineSource = "bookmarks" | "toc" | "headings" | "model" | "pages";
 
@@ -296,6 +296,11 @@ export const books = sqliteTable(
     format: text("format").$type<"pdf" | "text">().notNull(),
     pages: integer("pages").notNull().default(0),
     chars: integer("chars").notNull().default(0),
+    /** The original file in data/books, for the page viewer and for OCR. */
+    file: text("file"),
+    /** Scanned pages (no text layer) to recognize, and how many are done. */
+    ocrTotal: integer("ocr_total").notNull().default(0),
+    ocrDone: integer("ocr_done").notNull().default(0),
     status: text("status").$type<BookStatus>().notNull().default("reading"),
     outlineSource: text("outline_source").$type<OutlineSource>(),
     /** PDF bookmarks or Markdown headings found while reading, kept until the outline is built. */
@@ -314,6 +319,8 @@ export const bookPages = sqliteTable(
     /** 1-based, as the PDF viewer counts. */
     page: integer("page").notNull(),
     text: text("text").notNull(),
+    /** 0: the PDF's own text; 1: scanned, waiting for OCR; 2: recognized by OCR. */
+    ocr: integer("ocr").notNull().default(0),
   },
   (t) => [uniqueIndex("book_pages_page").on(t.bookId, t.page)],
 );
