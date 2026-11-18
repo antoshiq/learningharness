@@ -10,7 +10,7 @@ import type { AssessmentKind } from "@/server/db/schema";
 import type { SemesterView } from "@/server/semester";
 import type { DrillItem } from "@/lib/types";
 
-type Kind = Exclude<AssessmentKind, "homework">;
+type Kind = Exclude<AssessmentKind, "homework" | "oral">;
 
 const RULES: Record<Kind, string> = {
   placement: "Вопросы по тому, на что опирается курс. Что знаешь — засчитается, что слабо — подтянешь в нулевом модуле.",

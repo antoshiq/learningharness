@@ -85,6 +85,13 @@
       "when": 1795030409386,
       "tag": "0011_book_ocr",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1795031338611,
+      "tag": "0012_semester_pause",
+      "breakpoints": true
     }
   ]
 }

@@ -451,7 +451,7 @@ export interface ActiveInfo {
   calendar: {
     currentWeek: number;
     weeks: { week: number; start: number; modules: string[]; midterm: boolean; final: boolean }[];
-    pace: "ahead" | "ok" | "behind" | "late";
+    pace: "ahead" | "ok" | "behind" | "late" | "paused";
     expectedPassed: number;
     passed: number;
     total: number;
@@ -494,6 +494,7 @@ export interface SemesterView {
   createdAt: number;
   startedAt: number | null;
   finishedAt: number | null;
+  pausedAt: number | null;
   active: ActiveInfo | null;
 }
 
@@ -548,6 +549,7 @@ export function getSemesterView(id: number): SemesterView {
     createdAt: s.createdAt,
     startedAt: s.startedAt,
     finishedAt: s.finishedAt,
+    pausedAt: s.pausedAt,
     active: s.status === "active" || s.status === "finished" ? activeInfo(id, modules) : null,
   };
 }
@@ -611,7 +613,11 @@ function activeInfo(id: number, modules: ModuleView[]): ActiveInfo {
   const cal = calendar(rows, sem);
   const homework = listHomework(id);
   const today: TodayTask[] = [];
-  if (sem.status === "active") {
+  if (sem.status === "active" && sem.pausedAt) {
+    // On a pause only the review keeps going, so nothing is forgotten meanwhile.
+    const due = reviewQueue().items.length;
+    if (due) today.push({ kind: "review", title: `Повторение: ${due}`, href: "/review" });
+  } else if (sem.status === "active") {
     const midterm = examAvailability(id, "midterm");
     const final = examAvailability(id, "final");
     const open = modules.find((m) => m.status === "open");
@@ -716,4 +722,44 @@ export function activeSemesters(): SemesterBrief[] {
       const a = v.active!;
       return { id: v.id, title: v.title, week: a.calendar.currentWeek, weeks: v.weeks, pace: a.calendar.pace, progress: a.progress, today: a.today };
     });
+}
+
+const DAY = 86_400_000;
+
+/** Freeze a running semester: the calendar stands still until it is resumed. */
+export function pauseSemester(id: number) {
+  const sem = getSemesterRow(id);
+  if (sem.status !== "active") throw new Error("Пауза — только для идущего семестра");
+  if (sem.pausedAt) return;
+  getDb().update(schema.semesters).set({ pausedAt: Date.now() }).where(eq(schema.semesters.id, id)).run();
+}
+
+/** Resume: the whole calendar moves forward by the days of the pause, so nothing counts as missed. */
+export function resumeSemester(id: number, now = Date.now()) {
+  const sem = getSemesterRow(id);
+  if (!sem.pausedAt) return;
+  const days = Math.max(0, Math.ceil((startOfDay(now) - startOfDay(sem.pausedAt)) / DAY));
+  getDb()
+    .update(schema.semesters)
+    .set({ pausedAt: null, startDate: startOfDay(sem.startDate + days * DAY + DAY / 2) })
+    .where(eq(schema.semesters.id, id))
+    .run();
+  return days;
+}
+
+/** Move the calendar by whole days (later: positive), and/or give the semester more weeks. */
+export function reschedule(id: number, input: { days?: number; weeks?: number }) {
+  const sem = getSemesterRow(id);
+  if (sem.status !== "active") throw new Error("Перенести можно только идущий семестр");
+  const days = Math.round(Number(input.days ?? 0));
+  const weeks = Math.round(Number(input.weeks ?? 0));
+  if (!Number.isFinite(days) || Math.abs(days) > 120) throw new Error("Сдвиг — не больше 120 дней");
+  if (!Number.isFinite(weeks) || weeks < -26 || weeks > 26) throw new Error("Изменить длительность можно не больше чем на 26 недель");
+  const total = sem.weeks + weeks;
+  if (total < 1 || total > 78) throw new Error("Семестр должен длиться от 1 до 78 недель");
+  getDb()
+    .update(schema.semesters)
+    .set({ startDate: startOfDay(sem.startDate + days * DAY + DAY / 2), weeks: total })
+    .where(eq(schema.semesters.id, id))
+    .run();
 }

@@ -319,7 +319,7 @@ export async function buildAssessment(semesterId: number, kind: AssessmentKind, 
   const sem = getDb().select().from(schema.semesters).where(eq(schema.semesters.id, semesterId)).get();
   if (!sem) throw new Error("Семестр не найден");
   if (sem.status !== "active" && !(sem.status === "finished" && kind !== "placement")) throw new Error("Семестр ещё не начат");
-  if (kind === "homework") throw new Error("Это не экзамен");
+  if (kind === "homework" || kind === "oral") throw new Error("Это не письменный экзамен");
 
   if (kind === "checkpoint" || kind === "placement") {
     const m = moduleRow(moduleId ?? 0);

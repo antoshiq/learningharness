@@ -64,6 +64,10 @@ export function mockProvider(): LlmProvider {
         if (req.system.startsWith("Ты составляешь домашнее задание")) {
           return done([say(JSON.stringify({ title: "(тест) Домашнее задание", task: "Докажите, что $a + b = b + a$.", rubric: [{ criterion: "Верная идея", points: 6 }, { criterion: "Аккуратное оформление", points: 4 }] }))]);
         }
+        if (req.system.startsWith("Ты пересматриваешь оценку")) {
+          // The objection is right about the layout, wrong about the idea: one criterion up, one (wrongly) down.
+          return done([say(JSON.stringify({ scores: [{ criterion: "Верная идея", got: 3, comment: "(тест) без изменений" }, { criterion: "Аккуратное оформление", got: 4, comment: "(тест) ученик прав" }], feedback: "Оценка повышена: (тест)." }))]);
+        }
         if (req.system.startsWith("Ты проверяешь домашнее задание")) {
           return done([say(JSON.stringify({ scores: [{ criterion: "Верная идея", got: 6, comment: "(тест) верно" }, { criterion: "Аккуратное оформление", got: 2, comment: "(тест) небрежно" }], feedback: "(тест) Хорошо." }))]);
         }

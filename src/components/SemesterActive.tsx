@@ -6,7 +6,7 @@ import { useState } from "react";
 import { api, formatDate } from "@/lib/api";
 import { ASSESSMENT_LABEL, MASTERY_STEPS } from "@/lib/semester";
 import type { ModuleView, SemesterView, TodayTask } from "@/server/semester";
-import { Badge, Button, Card, Cells, cx, Dots, Icon, LinkButton, Notice, PanelTitle } from "./ui";
+import { Badge, Button, Card, Cells, cx, Dots, fieldClass, Icon, LinkButton, Notice, PanelTitle } from "./ui";
 
 const when = (ms: number) => new Date(ms).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
 const CREDIT = { exam: "сдан", early: "сдан досрочно", placement: "по входному тесту" } as const;
@@ -107,6 +107,11 @@ function ModuleActions({ s, m, onChange }: { s: SemesterView; m: ModuleView; onC
           <Icon name="chat" size={14} /> Объяснить
         </LinkButton>
       )}
+      {m.status === "passed" && m.kind === "regular" && !wait && (
+        <Link href={examHref(s, m)} className="text-xs text-accent hover:underline" title="В оценку идёт лучшая попытка">
+          пересдать на лучшую оценку
+        </Link>
+      )}
     </div>
   );
 }
@@ -147,7 +152,14 @@ function ExamLine({ s, kind }: { s: SemesterView; kind: "midterm" | "final" }) {
       <span className="min-w-0 flex-1 text-bright">{ASSESSMENT_LABEL[kind]}</span>
       {e.best !== null && <span className="text-xs text-muted tabular-nums">лучший результат {e.best}%</span>}
       {e.passed ? (
-        <Badge tone="ok">сдан</Badge>
+        <>
+          <Badge tone="ok">сдан</Badge>
+          {e.available && (
+            <Link href={`/semester/${s.id}/exam?kind=${kind}`} className="text-xs text-accent hover:underline" title="В оценку идёт лучшая попытка">
+              пересдать на лучшую оценку
+            </Link>
+          )}
+        </>
       ) : e.available ? (
         <LinkButton small variant="primary" href={`/semester/${s.id}/exam?kind=${kind}`}>
           Сдавать
@@ -174,6 +186,7 @@ function Now({ s }: { s: SemesterView }) {
     );
   }
   const open = s.modules.find((m) => m.status === "open");
+  if (s.pausedAt) return <Notice>Семестр на паузе: календарь стоит. Продолжить можно в «Паузе и переносе» ниже.</Notice>;
   let text: React.ReactNode = null;
   if (a.final.available && !a.final.passed) text = <>Все модули сданы — остался итоговый экзамен.</>;
   else if (a.midterm.available && !a.midterm.passed) text = <>Пора сдать промежуточный экзамен: он проверит, что пройденное не забылось.</>;
@@ -191,7 +204,71 @@ const PACE = {
   ok: ["ok", "в графике"],
   behind: ["warn", "отстаёшь"],
   late: ["bad", "срок вышел"],
+  paused: ["neutral", "на паузе"],
 } as const;
+
+/** Freeze the semester or move its calendar. */
+function Schedule({ s, onChange }: { s: SemesterView; onChange: () => void }) {
+  const [days, setDays] = useState(7);
+  const [weeks, setWeeks] = useState(2);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const act = async (url: string, body: unknown) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api(url, { body });
+      onChange();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setBusy(false);
+  };
+  const since = s.pausedAt ? new Date(s.pausedAt).toLocaleDateString("ru-RU", { day: "numeric", month: "long" }) : null;
+  return (
+    <section className="overflow-hidden rounded-md border border-border bg-surface">
+      <PanelTitle>Пауза и перенос</PanelTitle>
+      <div className="space-y-3 px-3 py-3 text-sm">
+        {since ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="min-w-0 flex-1">
+              Семестр на паузе с {since}. Календарь стоит; когда продолжишь, все сроки сдвинутся на дни паузы. Повторение идёт и сейчас — чтобы ничего не забылось.
+            </span>
+            <Button small variant="primary" disabled={busy} onClick={() => act(`/api/semesters/${s.id}/pause`, { action: "resume" })}>
+              <Icon name="play" size={14} /> Продолжить
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="min-w-0 flex-1 text-muted">Отпуск, болезнь, сессия по другому предмету — поставь семестр на паузу, и отставание не накопится.</span>
+            <Button small disabled={busy} onClick={() => act(`/api/semesters/${s.id}/pause`, { action: "pause" })}>
+              Поставить на паузу
+            </Button>
+          </div>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-muted">Сдвинуть календарь на</span>
+          <input type="number" min={-60} max={120} className={cx(fieldClass, "w-20 py-1 text-right sm:py-0.5")} value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label="Дней" />
+          <span className="text-muted">дн.</span>
+          <Button small disabled={busy || !days} onClick={() => act(`/api/semesters/${s.id}/reschedule`, { days })}>
+            Сдвинуть
+          </Button>
+          <span className="w-4" />
+          <span className="text-muted">Продлить на</span>
+          <input type="number" min={-26} max={26} className={cx(fieldClass, "w-20 py-1 text-right sm:py-0.5")} value={weeks} onChange={(e) => setWeeks(Number(e.target.value))} aria-label="Недель" />
+          <span className="text-muted">нед.</span>
+          <Button small disabled={busy || !weeks} onClick={() => act(`/api/semesters/${s.id}/reschedule`, { weeks })}>
+            Изменить
+          </Button>
+        </div>
+        <p className="text-xs text-muted">
+          Сейчас: {s.weeks} нед., начало {new Date(s.startDate).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}. Отрицательные числа сдвигают назад и укорачивают.
+        </p>
+        {error && <Notice tone="bad">{error}</Notice>}
+      </div>
+    </section>
+  );
+}
 
 const TASK_ICON: Record<TodayTask["kind"], "play" | "check" | "clock" | "note"> = {
   placement: "check",
@@ -363,6 +440,7 @@ export function SemesterActive({ s, onChange }: { s: SemesterView; onChange: () 
       </section>
 
       <Homework s={s} />
+      {s.status === "active" && <Schedule s={s} onChange={onChange} />}
 
       <section className="overflow-hidden rounded-md border border-border bg-surface">
         <PanelTitle>Экзамены</PanelTitle>

@@ -141,6 +141,7 @@ export async function submitHomework(semesterId: number, id: number, answer: str
       .values({
         semesterId,
         moduleId: null,
+        homeworkId: id,
         kind: "homework",
         score: total,
         // Homework is "passed" at a satisfactory grade; its score itself goes into the final grade.
@@ -157,4 +158,63 @@ export async function submitHomework(semesterId: number, id: number, answer: str
 export function homeworkModuleTitles(ids: number[]) {
   if (!ids.length) return [];
   return getDb().select({ id: schema.semesterModules.id, title: schema.semesterModules.title }).from(schema.semesterModules).where(inArray(schema.semesterModules.id, ids)).orderBy(desc(schema.semesterModules.idx)).all();
+}
+
+export const APPEAL_SYSTEM = `Ты пересматриваешь оценку домашнего задания: ученик с ней не согласен. Перечитай задание, критерии, ответ ученика, прежнюю оценку и его возражение.
+- Будь честным: если ученик прав (решение верно, а проверка ошиблась или придралась), повысь баллы по нужным критериям; если нет — оставь как было и объясни по существу, почему.
+- Баллы не снижай: апелляция не может навредить.
+- В feedback начни с вывода («Оценка повышена: …» или «Оценка остаётся: …»), затем коротко обоснуй.
+Ответ — только JSON: {"scores": [{"criterion": "...", "got": 2, "max": 3, "comment": "..."}], "feedback": "..."}`;
+
+/** The learner disputes a homework grade once; the model reconsiders and may only raise it. */
+export async function appealHomework(semesterId: number, id: number, objection: string): Promise<HomeworkRow> {
+  const db = getDb();
+  const h = getHomework(semesterId, id);
+  if (h.status !== "graded" || !h.review) throw new Error("Сначала задание должно быть проверено");
+  if (h.appeal) throw new Error("Апелляция уже была");
+  const text = objection.trim();
+  if (text.length < 10) throw new Error("Объясни, с чем не согласен");
+  const r = await chatAs("strong", "semester-homework-appeal", null, {
+    system: APPEAL_SYSTEM,
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: [
+              `Задание:\n${h.task}`,
+              `Критерии:\n${h.rubric.map((c) => `- ${c.criterion} (${c.points} б.)`).join("\n")}`,
+              `Ответ ученика:\n${h.answer ?? ""}`,
+              `Прежняя оценка:\n${h.review.scores.map((s) => `- ${s.criterion}: ${s.got} из ${s.max}. ${s.comment}`).join("\n")}\n${h.review.feedback}`,
+              `Возражение ученика:\n${text.slice(0, 4000)}`,
+            ].join("\n\n"),
+          },
+        ],
+      },
+    ],
+    maxTokens: 4000,
+  });
+  const raw = (jsonObject(r.content.filter(isText).map((b) => b.text).join("")) ?? {}) as { scores?: unknown; feedback?: unknown };
+  const given = Array.isArray(raw.scores) ? (raw.scores as { criterion?: unknown; got?: unknown; comment?: unknown }[]) : [];
+  if (!given.length) throw new Error("Не удалось пересмотреть оценку. Попробуй ещё раз.");
+  const before = h.review;
+  const scores = h.rubric.map((c, i) => {
+    const old = before.scores.find((s) => s.criterion === c.criterion) ?? before.scores[i];
+    const g = given.find((x) => String(x.criterion ?? "").trim() === c.criterion) ?? given[i];
+    // Never lower than before.
+    const got = Math.max(old?.got ?? 0, Math.min(c.points, Number(g?.got) || 0));
+    return { criterion: c.criterion, max: c.points, got, comment: String(g?.comment ?? old?.comment ?? "").slice(0, 600) };
+  });
+  const max = scores.reduce((n, s) => n + s.max, 0) || 1;
+  const total = Math.round((scores.reduce((n, s) => n + s.got, 0) / max) * 1000) / 10;
+  const review: HomeworkReview = { scores, total, feedback: typeof raw.feedback === "string" ? raw.feedback.slice(0, 3000) : "" };
+  db.transaction((tx) => {
+    tx.update(schema.semesterHomework).set({ appeal: text, firstReview: before, review }).where(eq(schema.semesterHomework.id, id)).run();
+    tx.update(schema.semesterAssessments)
+      .set({ score: total, passed: total >= 55, details: scores.map((s) => ({ key: s.criterion.slice(0, 80), title: s.criterion.slice(0, 120), got: s.got, total: s.max })) })
+      .where(eq(schema.semesterAssessments.homeworkId, id))
+      .run();
+  });
+  return getHomework(semesterId, id);
 }

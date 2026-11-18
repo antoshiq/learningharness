@@ -152,3 +152,74 @@ describe("a book added to a running semester", () => {
     expect(v.books.find((b) => b.id === bookId)!.status).toBe("ready");
   });
 });
+
+describe("pause and rescheduling", () => {
+  it("a pause freezes the calendar and moves it by the days of the pause", async () => {
+    const id = await running();
+    const before = sem.getSemesterRow(id);
+    sem.pauseSemester(id);
+    let v = sem.getSemesterView(id);
+    expect(v.pausedAt).not.toBeNull();
+    expect(v.active!.calendar.pace).toBe("paused");
+    expect(v.active!.today.every((t) => t.kind === "review")).toBe(true);
+
+    // Ten days later.
+    const pausedAt = Date.now() - 10 * DAY;
+    dbmod.getDb().update(dbmod.schema.semesters).set({ pausedAt }).where(eq(dbmod.schema.semesters.id, id)).run();
+    expect(sem.resumeSemester(id)).toBe(10);
+    v = sem.getSemesterView(id);
+    expect(v.pausedAt).toBeNull();
+    expect(Math.round((v.startDate - before.startDate) / DAY)).toBe(10);
+    expect(v.active!.today[0].kind).toBe("placement");
+  });
+
+  it("moves the calendar and changes the length within limits", async () => {
+    const id = await running();
+    const start = sem.getSemesterRow(id).startDate;
+    sem.reschedule(id, { days: 7, weeks: 2 });
+    let row = sem.getSemesterRow(id);
+    expect(Math.round((row.startDate - start) / DAY)).toBe(7);
+    expect(row.weeks).toBe(6);
+    sem.reschedule(id, { days: -7, weeks: -1 });
+    row = sem.getSemesterRow(id);
+    expect(row.startDate).toBe(start);
+    expect(row.weeks).toBe(5);
+    expect(() => sem.reschedule(id, { weeks: -10 })).toThrow(/от 1 до 78/);
+    expect(() => sem.reschedule(id, { days: 500 })).toThrow(/120 дней/);
+  });
+});
+
+describe("appeal and retakes", () => {
+  it("an appeal can only raise a homework grade, once, and updates the grade book", async () => {
+    const id = await running();
+    mods.recordAssessment(id, { kind: "placement", moduleId: sem.getSemesterView(id).modules[0].id, score: 100 });
+    await jobs.waitJob(`semester-modules:${id}`);
+    dbmod.getDb().update(dbmod.schema.nodes).set({ status: "learning" }).where(eq(dbmod.schema.nodes.topicId, sem.getSemesterView(id).modules[1].topicId!)).run();
+    const h = await hw.createHomework(id);
+    await expect(hw.appealHomework(id, h.id, "Я не согласен с оценкой")).rejects.toThrow(/проверено/);
+    await hw.submitHomework(id, h.id, "Решение достаточно длинное для проверки по критериям.");
+    const after = await hw.appealHomework(id, h.id, "Оформление аккуратное: все шаги подписаны.");
+    // Idea stays 6 (the model's 3 would lower it), layout goes 2 -> 4: 10 of 10.
+    expect(after.review!.scores.map((s) => s.got)).toEqual([6, 4]);
+    expect(after.review!.total).toBe(100);
+    expect(after.firstReview!.total).toBe(80);
+    expect(sem.getSemesterView(id).active!.grades.find((g) => g.kind === "homework")!.score).toBe(100);
+    await expect(hw.appealHomework(id, h.id, "Ещё раз пересмотрите")).rejects.toThrow(/уже была/);
+  });
+
+  it("a passed module can be retaken for a better grade, the best try counts", async () => {
+    const id = await running();
+    let v = sem.getSemesterView(id);
+    mods.recordAssessment(id, { kind: "placement", moduleId: v.modules[0].id, score: 100 });
+    await jobs.waitJob(`semester-modules:${id}`);
+    v = sem.getSemesterView(id);
+    mods.recordAssessment(id, { kind: "checkpoint", moduleId: v.modules[1].id, score: 82 });
+    const exam = await mods.buildAssessment(id, "checkpoint", v.modules[1].id);
+    expect(exam.items.length).toBeGreaterThan(0);
+    mods.recordAssessment(id, { kind: "checkpoint", moduleId: v.modules[1].id, score: 95 });
+    mods.recordAssessment(id, { kind: "checkpoint", moduleId: v.modules[1].id, score: 70 });
+    v = sem.getSemesterView(id);
+    expect(v.modules[1]).toMatchObject({ status: "passed", credit: "early" });
+    expect(v.active!.grade!.pct).toBe(95);
+  });
+});

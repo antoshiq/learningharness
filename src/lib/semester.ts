@@ -35,6 +35,7 @@ export const ASSESSMENT_LABEL: Record<AssessmentKind, string> = {
   midterm: "Промежуточный экзамен",
   final: "Итоговый экзамен",
   homework: "Домашнее задание",
+  oral: "Устный экзамен",
 };
 
 /** Weights of the final grade; missing parts are left out and the rest renormalized. */

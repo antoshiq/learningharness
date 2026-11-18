@@ -25,7 +25,7 @@ export interface Calendar {
   /** Modules that should be closed by now. */
   expectedPassed: number;
   passed: number;
-  pace: "ahead" | "ok" | "behind" | "late";
+  pace: "ahead" | "ok" | "behind" | "late" | "paused";
   /** Hours per week needed for what is left in the weeks left. */
   neededPerWeek: number;
   daysLeft: number;
@@ -56,7 +56,9 @@ export function layout(modules: ModuleRow[], weeks: number, hoursPerWeek: number
   return plan;
 }
 
-export function calendar(modules: ModuleRow[], sem: { weeks: number; hoursPerWeek: number; startDate: number }, now = Date.now()): Calendar {
+export function calendar(modules: ModuleRow[], sem: { weeks: number; hoursPerWeek: number; startDate: number; pausedAt?: number | null }, at = Date.now()): Calendar {
+  // A frozen semester is shown as it stood on the day it was paused.
+  const now = sem.pausedAt ?? at;
   const weeks = layout(modules, sem.weeks, sem.hoursPerWeek, sem.startDate);
   const today = startOfDay(now);
   const currentWeek = today < sem.startDate ? 0 : Math.min(sem.weeks + 1, Math.floor((today - sem.startDate) / WEEK) + 1);
@@ -71,7 +73,8 @@ export function calendar(modules: ModuleRow[], sem: { weeks: number; hoursPerWee
   const daysLeft = Math.max(0, Math.round((end - today) / DAY));
   const leftHours = modules.filter((m) => !m.credit).reduce((n, m) => n + m.hours, 0);
   const neededPerWeek = Math.round((leftHours / Math.max(1, daysLeft / 7)) * 10) / 10;
-  const pace: Calendar["pace"] =
-    passed === modules.length ? "ok" : daysLeft === 0 ? "late" : passed > expected ? "ahead" : passed < expected || neededPerWeek > sem.hoursPerWeek * 1.25 ? "behind" : "ok";
+  const pace: Calendar["pace"] = sem.pausedAt
+    ? "paused"
+    : passed === modules.length ? "ok" : daysLeft === 0 ? "late" : passed > expected ? "ahead" : passed < expected || neededPerWeek > sem.hoursPerWeek * 1.25 ? "behind" : "ok";
   return { currentWeek, weeks, expectedPassed: expected, passed, pace, neededPerWeek, daysLeft };
 }

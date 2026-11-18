@@ -17,12 +17,60 @@ interface View {
   rubric: HomeworkCriterion[];
   answer: string | null;
   review: HomeworkReview | null;
+  appeal: string | null;
+  firstReview: HomeworkReview | null;
   status: "open" | "graded";
   semester: { id: number; title: string };
   modules: { id: number; title: string }[];
 }
 
 const DRAFT_KEY = (id: string) => `tutor-homework-draft-${id}`;
+
+/** Disagree with the grade, once: the model reconsiders and can only raise it. */
+function Appeal({ semesterId, hid, onDone }: { semesterId: string; hid: string; onDone: () => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!open) {
+    return (
+      <Button small variant="ghost" onClick={() => setOpen(true)}>
+        Не согласен с оценкой
+      </Button>
+    );
+  }
+  return (
+    <Card className="space-y-2">
+      <h2 className="text-[15px] font-semibold text-bright">Апелляция</h2>
+      <p className="text-sm text-muted">Объясни, где проверка ошиблась: какой шаг верен и почему. Модель пересмотрит оценку; ниже прежней она не станет. Подать можно один раз.</p>
+      <textarea className={cx(inputClass, "min-h-28 resize-y")} value={text} onChange={(e) => setText(e.target.value)} placeholder="Например: во втором пункте я доказал неравенство по индукции, это в строках 3–6, а проверка пишет, что доказательства нет." />
+      {error && <Notice tone="bad">{error}</Notice>}
+      <Button
+        variant="primary"
+        disabled={busy || text.trim().length < 10}
+        onClick={async () => {
+          setBusy(true);
+          setError(null);
+          try {
+            await api(`/api/semesters/${semesterId}/homework/${hid}/appeal`, { body: { text } });
+            await onDone();
+          } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+            setBusy(false);
+          }
+        }}
+      >
+        {busy ? (
+          <>
+            <Dots /> Пересматриваю…
+          </>
+        ) : (
+          "Подать апелляцию"
+        )}
+      </Button>
+    </Card>
+  );
+}
 
 export default function HomeworkPage() {
   const { id, hid } = useParams<{ id: string; hid: string }>();
@@ -130,10 +178,23 @@ export default function HomeworkPage() {
                   </b>
                   . Результат записан в ведомость.
                 </Notice>
+                {h.firstReview && (
+                  <p className="text-sm text-muted">
+                    После апелляции: было {h.firstReview.total}%, стало {h.review.total}%.
+                  </p>
+                )}
                 {h.review.feedback && (
                   <Card>
                     <Markdown text={h.review.feedback} />
                   </Card>
+                )}
+                {!h.appeal ? (
+                  <Appeal semesterId={id} hid={hid} onDone={load} />
+                ) : (
+                  <details className="rounded-md border border-border bg-surface px-3 py-2">
+                    <summary className="cursor-pointer text-[13px] text-bright">Твоя апелляция</summary>
+                    <p className="mt-2 text-sm whitespace-pre-wrap">{h.appeal}</p>
+                  </details>
                 )}
                 <details className="rounded-md border border-border bg-surface px-3 py-2">
                   <summary className="cursor-pointer text-[13px] text-bright">Твой ответ</summary>

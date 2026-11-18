@@ -390,6 +390,8 @@ export const semesters = sqliteTable("semesters", {
   createdAt: integer("created_at").notNull(),
   startedAt: integer("started_at"),
   finishedAt: integer("finished_at"),
+  /** Set while the semester is frozen (holiday, illness): the calendar stands still. */
+  pausedAt: integer("paused_at"),
 });
 
 export const semesterModules = sqliteTable(
@@ -417,7 +419,7 @@ export const semesterModules = sqliteTable(
   (t) => [index("semester_modules_semester").on(t.semesterId, t.idx)],
 );
 
-export type AssessmentKind = "placement" | "checkpoint" | "midterm" | "final" | "homework";
+export type AssessmentKind = "placement" | "checkpoint" | "midterm" | "final" | "homework" | "oral";
 
 /** The grade book: every graded piece of work. */
 export const semesterAssessments = sqliteTable(
@@ -426,6 +428,8 @@ export const semesterAssessments = sqliteTable(
     id: integer("id").primaryKey({ autoIncrement: true }),
     semesterId: integer("semester_id").notNull(),
     moduleId: integer("module_id"),
+    /** For homework: which task it grades (an appeal changes this row). */
+    homeworkId: integer("homework_id"),
     kind: text("kind").$type<AssessmentKind>().notNull(),
     /** Percent, 0–100. */
     score: real("score").notNull(),
@@ -461,6 +465,9 @@ export const semesterHomework = sqliteTable(
     rubric: text("rubric", { mode: "json" }).$type<HomeworkCriterion[]>().notNull(),
     answer: text("answer"),
     review: text("review", { mode: "json" }).$type<HomeworkReview | null>(),
+    /** The learner's objection to the grade, and the grade before it was reconsidered. */
+    appeal: text("appeal"),
+    firstReview: text("first_review", { mode: "json" }).$type<HomeworkReview | null>(),
     status: text("status").$type<"open" | "graded">().notNull().default("open"),
     createdAt: integer("created_at").notNull(),
     gradedAt: integer("graded_at"),
