@@ -139,7 +139,7 @@ export function LinkButton({
 
 /** A panel: the darker chrome surface with a hairline border. */
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cx("rounded-md border border-border bg-surface p-4 sm:p-5", className)}>{children}</div>;
+  return <div className={cx("rounded-md border border-border bg-surface p-4 sm:p-5 minimal:rounded-lg", className)}>{children}</div>;
 }
 
 /** Header of a panel. */
@@ -335,7 +335,7 @@ export function Loading() {
 }
 
 export function Page({ children, narrow }: { children: ReactNode; narrow?: boolean }) {
-  return <main className={cx("enter mx-auto w-full px-4 pt-6 pb-16 sm:px-8 sm:pt-9", narrow ? "max-w-3xl" : "max-w-5xl")}>{children}</main>;
+  return <main className={cx("enter mx-auto w-full px-4 pt-6 pb-16 sm:px-8 sm:pt-9 minimal:sm:pt-12 minimal:pb-24", narrow ? "max-w-3xl" : "max-w-5xl")}>{children}</main>;
 }
 
 export function Logo({ size = 20 }: { size?: number }) {
@@ -378,35 +378,40 @@ export function TopNav({
 }) {
   const trail: Crumb[] = [{ label: "Репетитор", href: "/" }, ...crumbs];
   const { model, mock, openPalette } = useWorkbench();
+  const path = (className: string) => (
+    <nav className={cx("items-center gap-0.5 overflow-hidden text-[13px] text-muted", className)} aria-label="Путь">
+      {trail.map((c, i) => (
+        <span key={i} className="flex min-w-0 items-center gap-0.5">
+          {i > 0 && <Icon name="chevron" size={14} className="opacity-70" />}
+          {c.href ? (
+            <Link href={c.href} className="truncate rounded-sm px-1 hover:text-bright">
+              {c.label}
+            </Link>
+          ) : (
+            <span className="truncate px-1">{c.label}</span>
+          )}
+        </span>
+      ))}
+    </nav>
+  );
   return (
     <>
+      {/* Classic: a tab for the open "file", the path below it. Minimal: the path and the page's buttons in one quiet row. */}
       <header className="sticky top-0 z-30 bg-bg">
-        <div className="flex h-10 items-center border-b border-border bg-surface px-1.5">
-          <div className="flex h-7 max-w-[70%] items-center gap-2 rounded-md bg-surface-2 px-2.5 text-[13px] text-bright">
+        <div className="flex h-10 items-center border-b border-border bg-surface px-1.5 minimal:bg-bg/90 minimal:px-3 minimal:backdrop-blur-sm">
+          <div className="flex h-7 max-w-[70%] items-center gap-2 rounded-md bg-surface-2 px-2.5 text-[13px] text-bright minimal:hidden">
             <Icon name={icon} className="text-accent" />
             <span className="truncate">{tab}</span>
           </div>
-          <div className="flex flex-1 items-center justify-end gap-1 px-2">{right}</div>
+          {path("hidden min-w-0 minimal:flex")}
+          <div className="flex flex-1 items-center justify-end gap-1 px-2 minimal:pr-0">{right}</div>
         </div>
-        <nav className="flex h-7 items-center gap-0.5 overflow-hidden px-3 text-[13px] text-muted" aria-label="Путь">
-          {trail.map((c, i) => (
-            <span key={i} className="flex min-w-0 items-center gap-0.5">
-              {i > 0 && <Icon name="chevron" size={14} className="opacity-70" />}
-              {c.href ? (
-                <Link href={c.href} className="truncate rounded-sm px-1 hover:text-bright">
-                  {c.label}
-                </Link>
-              ) : (
-                <span className="truncate px-1">{c.label}</span>
-              )}
-            </span>
-          ))}
-        </nav>
+        {path("flex h-7 px-3 minimal:hidden")}
         <div className="h-0.5 overflow-hidden" aria-hidden>
           {busy && <div className="progress-bar h-full w-1/4 bg-accent-strong" />}
         </div>
       </header>
-      <footer className="fixed inset-x-0 bottom-0 z-40 hidden h-7 items-center gap-4 bg-chrome px-3.5 pt-px text-xs whitespace-nowrap text-muted sm:flex">
+      <footer className="fixed inset-x-0 bottom-0 z-40 hidden h-7 items-center gap-4 bg-chrome px-3.5 pt-px text-xs whitespace-nowrap text-muted sm:flex minimal:sm:hidden">
         <span className="flex items-center gap-1.5 text-accent">
           <Icon name="book" size={14} />
           Репетитор

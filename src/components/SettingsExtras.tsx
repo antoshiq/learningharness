@@ -2,23 +2,36 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, formatDate } from "@/lib/api";
-import { THEME_LABEL, useThemePref, type ThemePref } from "@/lib/theme";
+import { THEME_LABEL, UI_LABEL, useThemePref, useUiStyle, type ThemePref, type UiStyle } from "@/lib/theme";
 import type { AppConfig } from "@/lib/types";
 import { Badge, Button, Card, cx, Icon, inputClass, Notice, Segmented, Sheet } from "./ui";
 import { notifyChanged } from "./workbench-context";
 
 export function AppearanceCard() {
   const [pref, setPref] = useThemePref();
+  const [ui, setUi] = useUiStyle();
   return (
-    <Card className="space-y-3">
+    <Card className="space-y-4">
       <h2 className="text-[15px] font-semibold text-bright">Оформление</h2>
-      <Segmented
-        label="Тема"
-        value={pref}
-        onChange={setPref}
-        options={(["system", "light", "dark"] as ThemePref[]).map((p) => [p, THEME_LABEL[p]] as const)}
-      />
-      <p className="text-sm text-muted">Выбор хранится в этом браузере. Сменить тему можно и кнопкой на левой панели или через Ctrl+K.</p>
+      <div>
+        <div className="mb-1 text-[13px] text-bright">Вид</div>
+        <Segmented label="Вид" value={ui} onChange={setUi} options={(["minimal", "classic"] as UiStyle[]).map((s) => [s, UI_LABEL[s]] as const)} />
+        <p className="mt-1 text-sm text-muted">
+          {ui === "minimal"
+            ? "Спокойный: одна страница без рамок окна, основные разделы слева, остальное — через Ctrl+K."
+            : "Как в редакторе кода: все разделы на панели, проводник, вкладка и строка состояния снизу."}
+        </p>
+      </div>
+      <div>
+        <div className="mb-1 text-[13px] text-bright">Тема</div>
+        <Segmented
+          label="Тема"
+          value={pref}
+          onChange={setPref}
+          options={(["system", "light", "dark"] as ThemePref[]).map((p) => [p, THEME_LABEL[p]] as const)}
+        />
+      </div>
+      <p className="text-sm text-muted">Выбор хранится в этом браузере. Переключить можно и через Ctrl+K.</p>
     </Card>
   );
 }

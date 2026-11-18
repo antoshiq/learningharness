@@ -2,6 +2,9 @@
 @import "katex/dist/katex.min.css";
 @import "@xyflow/react/dist/style.css";
 
+/* `minimal:` utilities apply in the minimal look (data-ui on <html>, set before the first paint). */
+@custom-variant minimal (&:where([data-ui="minimal"], [data-ui="minimal"] *));
+
 /*
  * Visual language: a code editor (VS Code "Modern" themes).
  * --chrome is the window backdrop that shows in the gaps between blocks and
@@ -88,6 +91,38 @@
   --code-bg: #26272a;
   --widget-shadow: 0 0 8px 2px rgb(0 0 0 / 0.36);
 }
+/*
+ * The minimal look (default; "classic" is the code-editor look above): one
+ * calm background instead of a window backdrop with blocks, panels that differ
+ * from the page only slightly, hairlines that are barely there.
+ */
+:root[data-ui="minimal"] {
+  --chrome: #ffffff;
+  --surface: #fbfbfb;
+  --surface-2: #f2f2f3;
+  --border: #eeeeef;
+  --border-strong: #dcdcdf;
+  --code-bg: #f5f5f6;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-ui="minimal"]:not([data-theme="light"]) {
+    --chrome: #121314;
+    --surface: #161719;
+    --surface-2: #232427;
+    --border: #1f2022;
+    --border-strong: #323337;
+    --code-bg: #1e1f22;
+  }
+}
+:root[data-ui="minimal"][data-theme="dark"] {
+  --chrome: #121314;
+  --surface: #161719;
+  --surface-2: #232427;
+  --border: #1f2022;
+  --border-strong: #323337;
+  --code-bg: #1e1f22;
+}
+
 :root {
   color-scheme: light;
 }

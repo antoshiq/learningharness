@@ -512,7 +512,7 @@ export default function Home() {
                 </ul>
               </section>
 
-              <section className="hidden overflow-hidden rounded-md border border-border bg-surface sm:block">
+              <section className="hidden overflow-hidden rounded-md border border-border bg-surface sm:block minimal:sm:hidden">
                 <PanelTitle>Клавиши</PanelTitle>
                 <dl className="space-y-1.5 px-3 py-2.5 text-[13px]">
                   {(
@@ -537,7 +537,7 @@ export default function Home() {
                 </dl>
               </section>
 
-              <section className="overflow-hidden rounded-md border border-border bg-surface">
+              <section className="overflow-hidden rounded-md border border-border bg-surface minimal:hidden">
                 <PanelTitle>Модель</PanelTitle>
                 <div className="px-3 py-2.5 text-[13px]">
                   <div className="truncate font-mono text-xs text-bright">{mock ? "тестовая заглушка" : (model ?? "не выбрана")}</div>

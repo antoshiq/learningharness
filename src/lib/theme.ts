@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { THEME_KEY as KEY } from "./theme-script";
+import { THEME_KEY as KEY, UI_KEY } from "./theme-script";
 
 /** Light or dark: as in the system, or picked by the learner. Stored per browser. */
 export type ThemePref = "system" | "light" | "dark";
@@ -65,3 +65,36 @@ export function useDark(): boolean {
 }
 
 export const THEME_LABEL: Record<ThemePref, string> = { system: "Как в системе", light: "Светлая", dark: "Тёмная" };
+
+/** The look of the app: calm and roomy, or the busier code-editor look with all panels. */
+export type UiStyle = "minimal" | "classic";
+const UI_EVENT = "tutor:ui";
+
+export function getUiStyle(): UiStyle {
+  try {
+    return localStorage.getItem(UI_KEY) === "classic" ? "classic" : "minimal";
+  } catch {
+    return "minimal";
+  }
+}
+
+export function setUiStyle(style: UiStyle) {
+  try {
+    localStorage.setItem(UI_KEY, style);
+  } catch {}
+  document.documentElement.setAttribute("data-ui", style);
+  window.dispatchEvent(new Event(UI_EVENT));
+}
+
+export function useUiStyle(): [UiStyle, (s: UiStyle) => void] {
+  const [style, setStyle] = useState<UiStyle>("minimal");
+  useEffect(() => {
+    const update = () => setStyle(getUiStyle());
+    update();
+    window.addEventListener(UI_EVENT, update);
+    return () => window.removeEventListener(UI_EVENT, update);
+  }, []);
+  return [style, setUiStyle];
+}
+
+export const UI_LABEL: Record<UiStyle, string> = { minimal: "Минималистичный", classic: "Подробный" };

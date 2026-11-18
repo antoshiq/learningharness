@@ -371,3 +371,18 @@ test("lesson code editor: error line, reset and full screen", async () => {
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: "Редактор во весь экран" })).toBeVisible();
 });
+
+test("switches between the minimal and the classic look, and keeps the choice", async () => {
+  await page.goto("/settings");
+  const html = page.locator("html");
+  await expect(html).toHaveAttribute("data-ui", "minimal");
+  await expect(page.getByText("тестовая модель")).toBeHidden();
+  await page.getByRole("group", { name: "Вид" }).getByRole("button", { name: "Подробный" }).click();
+  await expect(html).toHaveAttribute("data-ui", "classic");
+  await page.reload();
+  await expect(html).toHaveAttribute("data-ui", "classic");
+  // The status bar of the classic look shows the model.
+  await expect(page.getByText("тестовая модель")).toBeVisible();
+  await page.getByRole("group", { name: "Вид" }).getByRole("button", { name: "Минималистичный" }).click();
+  await expect(html).toHaveAttribute("data-ui", "minimal");
+});

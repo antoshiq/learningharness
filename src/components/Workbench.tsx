@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { api, formatDate } from "@/lib/api";
-import { THEME_LABEL, useThemePref, type ThemePref } from "@/lib/theme";
+import { THEME_LABEL, useThemePref, useUiStyle, type ThemePref } from "@/lib/theme";
 import type { AppConfig, PlanNodeView } from "@/lib/types";
 import type { SessionView, TopicCard } from "@/server/sessions";
 import { Count, cx, Icon, Logo, usePresence, type IconName } from "./ui";
@@ -71,6 +71,7 @@ function SideBar({ open, topics, detail, topicId, sessionId, now }: { open: bool
     <aside
       className={cx(
         "glide fixed top-9 bottom-7 left-[60px] z-30 hidden w-[250px] flex-col overflow-y-auto rounded-lg border border-border bg-surface transition-[transform,opacity] duration-200 ease-out lg:flex",
+        "minimal:bottom-0 minimal:rounded-none minimal:border-y-0 minimal:border-l",
         !open && "pointer-events-none -translate-x-6 opacity-0",
       )}
       aria-label="Проводник"
@@ -288,6 +289,7 @@ export function Workbench({ children }: { children: ReactNode }) {
   const [sidebar, setSidebar] = useState(true);
   const [palette, setPalette] = useState(false);
   const [themePref, setThemePref] = useThemePref();
+  const [uiStyle, setUiStyle] = useUiStyle();
   const paletteShown = usePresence(palette, 110);
   const [now, setNow] = useState(() => Date.now());
 
@@ -325,7 +327,9 @@ export function Workbench({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     try {
-      if (localStorage.getItem(SIDEBAR_KEY) === "0") setSidebar(false);
+      // The explorer starts hidden in the minimal look, unless it was opened before.
+      const saved = localStorage.getItem(SIDEBAR_KEY);
+      if (saved === "0" || (saved === null && document.documentElement.getAttribute("data-ui") !== "classic")) setSidebar(false);
     } catch {}
   }, []);
   const toggleSidebar = useCallback(() => {
@@ -385,6 +389,13 @@ export function Workbench({ children }: { children: ReactNode }) {
     out.push({ id: "home", icon: "files", label: "Все темы", run: () => router.push("/") });
     out.push({ id: "settings", icon: "gear", label: "Настройки: ключи и модели", run: () => router.push("/settings") });
     out.push({ id: "sidebar", icon: "sidebar", label: "Показать или скрыть проводник", hint: "Ctrl+B", run: toggleSidebar });
+    out.push({
+      id: "ui-style",
+      icon: "contrast",
+      label: uiStyle === "minimal" ? "Вид: подробный (все панели)" : "Вид: минималистичный",
+      hint: "оформление",
+      run: () => setUiStyle(uiStyle === "minimal" ? "classic" : "minimal"),
+    });
     for (const t of ["light", "dark", "system"] as ThemePref[]) {
       if (t === themePref) continue;
       out.push({ id: `theme-${t}`, icon: t === "dark" ? "moon" : "sun", label: `Тема: ${THEME_LABEL[t].toLowerCase()}`, hint: "оформление", run: () => setThemePref(t) });
@@ -398,7 +409,7 @@ export function Workbench({ children }: { children: ReactNode }) {
       },
     });
     return out;
-  }, [topics, router, toggleSidebar, themePref, setThemePref]);
+  }, [topics, router, toggleSidebar, themePref, setThemePref, uiStyle, setUiStyle]);
 
   const openPalette = useCallback(() => setPalette(true), []);
   const navigate = useCallback((href: string) => router.push(href), [router]);
@@ -412,13 +423,13 @@ export function Workbench({ children }: { children: ReactNode }) {
   const inSettings = path.startsWith("/settings");
   const section = path.startsWith("/semester") ? "semester" : path.startsWith("/plan") ? "plan" : path.startsWith("/ask") ? "ask" : path.startsWith("/brief") ? "brief" : path.startsWith("/review") ? "review" : path.startsWith("/mistakes") ? "mistakes" : path.startsWith("/stats") ? "stats" : inSettings ? "settings" : "topics";
   const dueTotal = (topics ?? []).reduce((s, t) => s + t.due, 0);
-  const activity = (href: string, icon: IconName, label: string, active: boolean, badge = 0) => (
+  const activity = (href: string, icon: IconName, label: string, active: boolean, badge = 0, extra?: string) => (
     <Link
       href={href}
       title={label}
       aria-label={label}
       aria-current={active ? "page" : undefined}
-      className={cx("relative mx-auto grid size-9 place-items-center rounded-lg transition-[color,background-color,transform] duration-150 active:scale-90", active ? "bg-surface-2 text-bright" : "text-muted hover:text-bright")}
+      className={cx("relative mx-auto grid size-9 place-items-center rounded-lg transition-[color,background-color,transform] duration-150 active:scale-90", active ? "bg-surface-2 text-bright" : "text-muted hover:text-bright", extra)}
     >
       <Icon name={icon} size={22} />
       {badge > 0 && (
@@ -430,7 +441,7 @@ export function Workbench({ children }: { children: ReactNode }) {
   return (
     <WorkbenchContext.Provider value={ctx}>
       {/* Title bar with the command center. It sits straight on the window backdrop. */}
-      <div className="fixed inset-x-0 top-0 z-40 flex h-9 items-center gap-2 bg-chrome px-1.5">
+      <div className="fixed inset-x-0 top-0 z-40 flex h-9 items-center gap-2 bg-chrome px-1.5 minimal:border-b minimal:border-border">
         <Link href="/" className="flex shrink-0 items-center gap-2 px-1 sm:w-12 sm:justify-center sm:px-0" aria-label="Репетитор: все темы">
           <Logo size={18} />
         </Link>
@@ -452,14 +463,15 @@ export function Workbench({ children }: { children: ReactNode }) {
       </div>
 
       {/* Icons sit straight on the backdrop; the side bar and the editor are rounded blocks with gaps. */}
-      <nav className="fixed top-9 bottom-7 left-1.5 z-40 hidden w-12 flex-col gap-2.5 py-1.5 sm:flex" aria-label="Разделы">
+      {/* In the minimal look only the main sections stay here; the rest are one Ctrl+K away. */}
+      <nav className="fixed top-9 bottom-7 left-1.5 z-40 hidden w-12 flex-col gap-2.5 py-1.5 sm:flex minimal:bottom-0 minimal:gap-3 minimal:pt-3" aria-label="Разделы">
         {activity("/", "files", "Темы", section === "topics")}
         {activity("/semester", "cap", "Семестр", section === "semester")}
-        {activity("/plan", "calendar", "Подготовка к дате", section === "plan")}
-        {activity("/brief", "compass", "Быстрый экскурс", section === "brief")}
-        {activity("/ask", "chat", "Вопрос к проекту", section === "ask")}
+        {activity("/plan", "calendar", "Подготовка к дате", section === "plan", 0, section === "plan" ? undefined : "minimal:hidden")}
+        {activity("/brief", "compass", "Быстрый экскурс", section === "brief", 0, section === "brief" ? undefined : "minimal:hidden")}
+        {activity("/ask", "chat", "Вопрос к проекту", section === "ask", 0, section === "ask" ? undefined : "minimal:hidden")}
         {activity("/review", "clock", "Повторение на сегодня", section === "review", dueTotal)}
-        {activity("/mistakes", "target", "Работа над ошибками", section === "mistakes")}
+        {activity("/mistakes", "target", "Работа над ошибками", section === "mistakes", 0, section === "mistakes" ? undefined : "minimal:hidden")}
         {activity("/stats", "chart", "Статистика", section === "stats")}
         <button onClick={openPalette} title="Поиск и команды (Ctrl+K)" aria-label="Поиск и команды" className="mx-auto grid size-9 place-items-center rounded-lg text-muted transition-[color,transform] duration-150 hover:text-bright active:scale-90">
           <Icon name="search" size={22} />
@@ -482,6 +494,8 @@ export function Workbench({ children }: { children: ReactNode }) {
         id="editor"
         className={cx(
           "glide fixed inset-x-0 top-9 bottom-0 overflow-x-hidden overflow-y-auto bg-bg transition-[left] duration-200 ease-out sm:right-1.5 sm:bottom-7 sm:left-[60px] sm:rounded-lg sm:border sm:border-border",
+          // Minimal: the page fills the window; one hairline separates it from the section icons.
+          "minimal:sm:right-0 minimal:sm:bottom-0 minimal:sm:rounded-none minimal:sm:border-y-0 minimal:sm:border-r-0",
           sidebar && "lg:left-[316px]",
         )}
       >
