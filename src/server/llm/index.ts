@@ -3,6 +3,8 @@ import { spentSince, startOfDay } from "../stats";
 import { getDb, schema } from "../db";
 import { claudeCodeProvider } from "../agent/claude-code";
 import { anthropicProvider } from "./anthropic";
+import { codexProvider } from "./codex";
+import { geminiProvider } from "./gemini";
 import { mockProvider } from "./mock";
 import { openAiProvider } from "./openai";
 import { LlmError, type LlmProvider, type LlmRequest, type LlmResult } from "./types";
@@ -23,6 +25,10 @@ export function providerFor(id: ProviderId): LlmProvider {
       return openAiProvider({ id: "custom", baseUrl: getCustomBaseUrl(), apiKey: apiKey("custom") });
     case "claude-code":
       return claudeCodeProvider();
+    case "codex":
+      return codexProvider();
+    case "gemini-cli":
+      return geminiProvider();
     case "mock":
       return mockProvider();
   }

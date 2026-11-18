@@ -11,13 +11,24 @@ const PROVIDER_LABEL: Record<Exclude<ProviderId, "mock">, string> = {
   openrouter: "OpenRouter",
   custom: "Свой сервер",
   "claude-code": "Подписка Claude",
+  codex: "Подписка ChatGPT",
+  "gemini-cli": "Аккаунт Google (Gemini)",
 };
 const SUGGEST: Record<string, string[]> = {
   anthropic: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-2"],
   openrouter: [],
   custom: [],
   "claude-code": ["opus", "sonnet", "haiku"],
+  codex: ["default", "gpt-6.2-sol", "gpt-6.1-sol", "gpt-6-sol", "gpt-5.5"],
+  "gemini-cli": ["auto", "pro", "flash", "flash-lite", "gemini-3.1-pro-preview", "gemini-3.5-flash", "gemini-2.5-pro"],
 };
+const PLACEHOLDER: Partial<Record<ProviderId, string>> = {
+  openrouter: "например anthropic/claude-sonnet-5.5",
+  "claude-code": "opus, sonnet или haiku",
+  codex: "default — модель по умолчанию в Codex",
+  "gemini-cli": "auto, pro или flash",
+};
+const code = "rounded-sm bg-code px-1 py-px font-mono text-xs text-text";
 
 function KeyField({ label, saved, hint, onSave }: { label: string; saved: boolean; hint: string; onSave: (v: string) => Promise<void> }) {
   const [value, setValue] = useState("");
@@ -117,7 +128,7 @@ function RoleEditor({
           value={model}
           onChange={(e) => setModel(e.target.value)}
           list={`models-${name}`}
-          placeholder={provider === "openrouter" ? "например anthropic/claude-sonnet-5.5" : provider === "claude-code" ? "opus, sonnet или haiku" : "идентификатор модели"}
+          placeholder={PLACEHOLDER[provider] ?? "идентификатор модели"}
           spellCheck={false}
           autoCapitalize="off"
           autoCorrect="off"
@@ -259,6 +270,43 @@ export default function SettingsPage() {
               <p className="text-sm text-muted">
                 Лимиты общие с Claude Code и claude.ai: уроки расходуют ту же квоту. Стоимость в приложении для подписки не показывается, только токены. Этот способ
                 рассчитан на личное использование: раздавать приложение другим с входом через подписку правила Anthropic не разрешают.
+              </p>
+            </Card>
+
+            <Card className="space-y-3">
+              <h2 className="text-[15px] font-semibold text-bright">Подписка ChatGPT и аккаунт Google</h2>
+              <p className="text-sm text-muted">
+                Так же, как с Claude, можно учиться без API-ключа: приложение запускает установленную на компьютере программу под твоим входом. Нужен Node.js 20 или
+                новее.
+              </p>
+              <div className="text-sm text-muted">
+                <div className="text-bright">ChatGPT (Plus, Pro, Business…) через Codex</div>
+                <ol className="mt-1 list-decimal space-y-1 pl-5">
+                  <li>
+                    Установи: <code className={code}>npm install -g @openai/codex</code>
+                  </li>
+                  <li>
+                    Войди: <code className={code}>codex login</code> → «Sign in with ChatGPT».
+                  </li>
+                  <li>В «Моделях» выбери «Подписка ChatGPT» и модель (default — модель Codex по умолчанию).</li>
+                </ol>
+              </div>
+              <div className="text-sm text-muted">
+                <div className="text-bright">Gemini через Gemini CLI</div>
+                <ol className="mt-1 list-decimal space-y-1 pl-5">
+                  <li>
+                    Установи: <code className={code}>npm install -g @google/gemini-cli</code>
+                  </li>
+                  <li>
+                    Запусти <code className={code}>gemini</code> и выбери «Login with Google». Бесплатная квота есть у любого аккаунта, у Google AI Pro и Ultra
+                    она больше.
+                  </li>
+                  <li>В «Моделях» выбери «Аккаунт Google (Gemini)» и модель: auto, pro или flash.</li>
+                </ol>
+              </div>
+              <p className="text-sm text-muted">
+                Лимиты общие с Codex, ChatGPT и Gemini CLI. Ответ приходит чуть медленнее, чем по API-ключу: на каждый шаг запускается программа. Стоимость не
+                показывается, только токены. Используй это подключение только для себя.
               </p>
             </Card>
 

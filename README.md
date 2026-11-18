@@ -60,6 +60,9 @@
 - **Anthropic** или **OpenRouter** — вставь API-ключ.
 - **Свой сервер** — любой адрес, совместимый с OpenAI API (Ollama, LM Studio и т. п.). Модель должна поддерживать вызов инструментов.
 - **Подписка Claude** (Pro или Max) — без API-ключа. Нужен установленный Claude Code с выполненным входом (`claude`, затем `/login`). Приложение запускает его в фоне под твоим аккаунтом; лимиты общие с Claude Code и claude.ai. Только для личного использования.
+- **Подписка ChatGPT** (Plus, Pro, Business…) — без API-ключа, через Codex: `npm install -g @openai/codex`, затем `codex login` → «Sign in with ChatGPT». Модель `default` — та, что в Codex по умолчанию.
+- **Аккаунт Google (Gemini)** — без API-ключа, через Gemini CLI: `npm install -g @google/gemini-cli`, затем запусти `gemini` и выбери «Login with Google». Модели `auto`, `pro`, `flash`.
+- ChatGPT и Gemini работают так: на каждый шаг приложение запускает программу в пустой папке `data/codex` или `data/gemini`, отключает её собственные инструменты (командная строка, файлы, веб) и подставляет свой системный промпт. Вызовы инструментов урока модель пишет блоками `<tool_call>{…}</tool_call>`, приложение их разбирает (`src/server/llm/text-tools.ts`). Путь к программе можно задать через `TUTOR_CODEX_PATH` и `TUTOR_GEMINI_PATH`.
 - **Основная модель** ведёт уроки, **быстрая** отвечает на боковые вопросы.
 
 Ключи хранятся в `%USERPROFILE%\.tutor\secrets.json`, вне проекта.
