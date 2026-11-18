@@ -272,3 +272,61 @@ export const studyPlans = sqliteTable("study_plans", {
   topicIds: text("topic_ids", { mode: "json" }).$type<number[]>().notNull(),
   createdAt: integer("created_at").notNull(),
 });
+
+// ---------------------------------------------------------------------------
+// Books: long sources (textbooks, problem books, lecture notes) kept page by
+// page and split into sections, so a lesson reads only the part it needs.
+// ---------------------------------------------------------------------------
+
+export type BookRole = "main" | "problems" | "lectures" | "extra";
+export type BookStatus = "reading" | "outlining" | "ready" | "error";
+/** Where the table of contents came from, from the most to the least reliable. */
+export type OutlineSource = "bookmarks" | "toc" | "headings" | "model" | "pages";
+
+export const books = sqliteTable(
+  "books",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    semesterId: integer("semester_id"),
+    name: text("name").notNull(),
+    role: text("role").$type<BookRole>().notNull().default("main"),
+    /** pdf: real pages; text: fragments of about the same size. */
+    format: text("format").$type<"pdf" | "text">().notNull(),
+    pages: integer("pages").notNull().default(0),
+    chars: integer("chars").notNull().default(0),
+    status: text("status").$type<BookStatus>().notNull().default("reading"),
+    outlineSource: text("outline_source").$type<OutlineSource>(),
+    error: text("error"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [index("books_semester").on(t.semesterId)],
+);
+
+export const bookPages = sqliteTable(
+  "book_pages",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    bookId: integer("book_id").notNull(),
+    /** 1-based, as the PDF viewer counts. */
+    page: integer("page").notNull(),
+    text: text("text").notNull(),
+  },
+  (t) => [uniqueIndex("book_pages_page").on(t.bookId, t.page)],
+);
+
+export const bookSections = sqliteTable(
+  "book_sections",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    bookId: integer("book_id").notNull(),
+    idx: integer("idx").notNull(),
+    /** 1 = chapter, 2 = section, 3 = subsection. */
+    level: integer("level").notNull(),
+    title: text("title").notNull(),
+    pageFrom: integer("page_from").notNull(),
+    pageTo: integer("page_to").notNull(),
+    /** Written when a module that uses the section is prepared. */
+    summary: text("summary"),
+  },
+  (t) => [index("book_sections_book").on(t.bookId, t.idx)],
+);

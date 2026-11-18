@@ -55,6 +55,12 @@ export function mockProvider(): LlmProvider {
             ),
           ]);
         }
+        if (req.system.startsWith("Ты извлекаешь оглавление")) {
+          // Table of contents lines "Title ..... 12" become entries.
+          const text = req.messages.map((m) => m.content.filter(isText).map((b) => b.text).join("")).join("\n");
+          const entries = [...text.matchAll(/^(.+?)\s*\.{2,}\s*(\d+)\s*$/gm)].map((m) => ({ title: m[1].trim(), level: /^глава/i.test(m[1].trim()) ? 1 : 2, page: Number(m[2]) }));
+          return done([say(JSON.stringify(entries))]);
+        }
         if (req.system.startsWith("Ты отвечаешь на вопросы о проекте")) return done([say("(тест) Точка входа — `README.md:1`.")]);
         if (req.system.startsWith("Ученик читает краткий экскурс")) return done([say("(тест) Подробнее: $a + b = b + a$ для любых чисел.")]);
         return done([say("(тест) Короткий ответ на боковой вопрос.")]);
