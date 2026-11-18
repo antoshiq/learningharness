@@ -123,7 +123,7 @@ describe("semester preparation", () => {
     sem.approveProgram(id);
     expect(sem.getSemesterView(id).status).toBe("active");
     expect(() => sem.saveProgram(id, [{ title: "x", sections: [{ title: "y" }] }])).toThrow(/до начала/);
-    expect(sem.listSemesters().find((s) => s.id === id)).toMatchObject({ status: "active", modules: 1, passed: 0 });
+    expect(sem.listSemesters().find((s) => s.id === id)).toMatchObject({ status: "active", modules: 2, passed: 0 }); // with the zero module for the placement test
   });
 
   it("builds a program for a bare topic and suggests books", async () => {

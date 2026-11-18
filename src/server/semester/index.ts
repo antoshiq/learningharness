@@ -7,6 +7,9 @@ import { getDb, schema } from "../db";
 import type { BookRole, ProgramSection, SemesterLevel } from "../db/schema";
 import { isJobRunning, startJob } from "../jobs";
 import { startOfDay } from "../stats";
+import { gradeOf, GRADE_WEIGHTS } from "@/lib/semester";
+import type { AssessmentKind } from "../db/schema";
+import { assessments, examAvailability, ideaLevels, moduleStatuses, nextTry, prepareAhead, prepErrors, setupModules, type ExamAvailability, type IdeaLevels, type ModuleStatus } from "./modules";
 import { buildProgram, type ProgramModule } from "./program";
 
 const jobKey = (id: number) => `semester:${id}`;
@@ -384,6 +387,35 @@ export interface ModuleView {
   topicId: number | null;
   credit: "exam" | "early" | "placement" | null;
   passedAt: number | null;
+  /** Running semester only. */
+  status?: ModuleStatus;
+  prepared?: boolean;
+  ideas?: IdeaLevels & { perfect: string[] };
+  openSessionId?: number | null;
+  checkpoint?: { best: number | null; tries: number; nextTryAt: number | null };
+}
+
+export interface GradeLine {
+  id: number;
+  kind: AssessmentKind;
+  module: string | null;
+  score: number;
+  passed: boolean;
+  createdAt: number;
+}
+
+export interface ActiveInfo {
+  threshold: number;
+  /** Share of the program's ideas mastered, weighted by module size; closed modules count fully. */
+  progress: number;
+  /** Share known for good: explained and lasting. */
+  lasting: number;
+  midterm: ExamAvailability;
+  final: ExamAvailability;
+  grades: GradeLine[];
+  grade: { pct: number; mark: number; label: string; parts: { kind: AssessmentKind; pct: number; weight: number }[] } | null;
+  preparing: boolean;
+  prepareError: string | null;
 }
 
 export interface SemesterView {
@@ -409,6 +441,8 @@ export interface SemesterView {
   running: boolean;
   createdAt: number;
   startedAt: number | null;
+  finishedAt: number | null;
+  active: ActiveInfo | null;
 }
 
 export function moduleViews(semesterId: number): ModuleView[] {
@@ -461,6 +495,77 @@ export function getSemesterView(id: number): SemesterView {
     running: preparing(id),
     createdAt: s.createdAt,
     startedAt: s.startedAt,
+    finishedAt: s.finishedAt,
+    active: s.status === "active" || s.status === "finished" ? activeInfo(id, modules) : null,
+  };
+}
+
+/** Best score of each graded item, then the weighted grade (missing parts left out). */
+export function computeGrade(lines: { kind: AssessmentKind; moduleId: number | null; score: number }[]) {
+  const best = new Map<string, { kind: AssessmentKind; score: number }>();
+  for (const l of lines) {
+    if (l.kind === "placement") continue;
+    const k = `${l.kind}:${l.moduleId ?? ""}`;
+    if (!best.has(k) || best.get(k)!.score < l.score) best.set(k, { kind: l.kind, score: l.score });
+  }
+  const parts: { kind: AssessmentKind; pct: number; weight: number }[] = [];
+  for (const [kind, weight] of Object.entries(GRADE_WEIGHTS) as [AssessmentKind, number][]) {
+    const xs = [...best.values()].filter((b) => b.kind === kind).map((b) => b.score);
+    if (xs.length) parts.push({ kind, pct: Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10, weight });
+  }
+  if (!parts.length) return null;
+  const w = parts.reduce((n, p) => n + p.weight, 0);
+  const pct = Math.round((parts.reduce((n, p) => n + p.pct * p.weight, 0) / w) * 10) / 10;
+  return { pct, ...gradeOf(pct), parts };
+}
+
+function activeInfo(id: number, modules: ModuleView[]): ActiveInfo {
+  const db = getDb();
+  const sem = getSemesterRow(id);
+  prepareAhead(id);
+  const statuses = moduleStatuses(id);
+  const all = assessments(id);
+  const titles = new Map(modules.map((m) => [m.id, m.title]));
+  let weightSum = 0;
+  let masteredSum = 0;
+  let lastingSum = 0;
+  for (const m of modules) {
+    const ideas = ideaLevels(m.topicId);
+    const open = m.topicId
+      ? db
+          .select({ id: schema.sessions.id })
+          .from(schema.sessions)
+          .where(and(eq(schema.sessions.topicId, m.topicId), eq(schema.sessions.kind, "lesson"), sql`${schema.sessions.endedAt} is null`))
+          .orderBy(sql`${schema.sessions.id} desc`)
+          .get()
+      : undefined;
+    const tries = all.filter((a) => a.moduleId === m.id && (a.kind === "checkpoint" || a.kind === "placement"));
+    m.status = statuses.get(m.id);
+    m.prepared = !!m.topicId;
+    m.ideas = ideas;
+    m.openSessionId = open?.id ?? null;
+    const lastKind = tries[0]?.kind ?? "checkpoint";
+    m.checkpoint = { best: tries.length ? Math.max(...tries.map((a) => a.score)) : null, tries: tries.length, nextTryAt: nextTry(id, lastKind, m.id) };
+    if (m.kind !== "regular") continue;
+    // Module weight: its sections, a crude but stable measure of size.
+    const w = Math.max(1, m.sections.length);
+    weightSum += w;
+    masteredSum += w * (m.credit ? 1 : ideas.total ? ideas.checked / ideas.total : 0);
+    lastingSum += w * (ideas.total ? ideas.perfect.length / ideas.total : 0);
+  }
+  // The zero module is what the course assumes, not the course: it is not graded.
+  const zero = new Set(modules.filter((m) => m.kind === "prereq").map((m) => m.id));
+  const grade = computeGrade(all.filter((a) => !(a.moduleId && zero.has(a.moduleId))).map((a) => ({ kind: a.kind, moduleId: a.moduleId, score: a.score })));
+  return {
+    threshold: LEVELS[sem.level].threshold,
+    progress: weightSum ? Math.round((masteredSum / weightSum) * 100) : 0,
+    lasting: weightSum ? Math.round((lastingSum / weightSum) * 100) : 0,
+    midterm: examAvailability(id, "midterm"),
+    final: examAvailability(id, "final"),
+    grades: all.map((a) => ({ id: a.id, kind: a.kind, module: a.moduleId ? (titles.get(a.moduleId) ?? null) : null, score: a.score, passed: a.passed, createdAt: a.createdAt })),
+    grade: grade ? { pct: grade.pct, mark: grade.mark, label: grade.label, parts: grade.parts } : null,
+    preparing: isJobRunning(`semester-modules:${id}`),
+    prepareError: prepErrors.get(id) ?? null,
   };
 }
 
@@ -497,4 +602,5 @@ export function approveProgram(id: number) {
     throw new Error("В программе нет модулей");
   }
   db.update(schema.semesters).set({ status: "active", startedAt: Date.now() }).where(eq(schema.semesters.id, id)).run();
+  setupModules(id);
 }

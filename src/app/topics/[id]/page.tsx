@@ -32,6 +32,17 @@ interface Detail {
   parking: { id: number; text: string; done: boolean; createdAt: number }[];
   materials: Material[];
   usage: UsageTotals;
+  /** Set when the topic is a module of a semester. */
+  semester: {
+    semesterId: number;
+    semesterTitle: string;
+    moduleId: number;
+    moduleIdx: number;
+    kind: "regular" | "prereq";
+    credit: string | null;
+    threshold: number;
+    status: "locked" | "open" | "passed";
+  } | null;
 }
 
 const KIND = { lesson: "Урок", practice: "Практика", review: "Повторение" } as const;
@@ -332,6 +343,23 @@ export default function TopicPage() {
         }
       />
       <Page>
+        {d.semester && (
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-l-2 border-border border-l-accent bg-surface px-3 py-2 text-[13px]">
+            <Icon name="cap" className="text-accent" />
+            <span className="min-w-0 flex-1">
+              {d.semester.kind === "prereq" ? "Нулевой модуль" : `Модуль ${d.semester.moduleIdx}`} семестра{" "}
+              <Link href={`/semester/${d.semester.semesterId}`} className="text-accent hover:underline">
+                «{d.semester.semesterTitle}»
+              </Link>
+              {d.semester.credit ? " · сдан" : d.semester.status === "locked" ? " · ещё закрыт" : ` · закрывается контрольной от ${d.semester.threshold}%`}
+            </span>
+            {d.semester.status === "open" && (
+              <LinkButton small variant={d.plan.length > 0 && d.plan.every((n) => n.status === "mastered") ? "primary" : "secondary"} href={`/semester/${d.semester.semesterId}/exam?kind=checkpoint&module=${d.semester.moduleId}`}>
+                <Icon name="check" size={14} /> Контрольная модуля
+              </LinkButton>
+            )}
+          </div>
+        )}
         <h1 className="text-[26px] leading-tight font-normal text-balance text-bright">{d.topic.title}</h1>
         {d.topic.goal && <p className="mt-1 max-w-[76ch] text-muted">{d.topic.goal}</p>}
         {d.topic.repoPath && <p className="mt-1 font-mono text-xs break-all text-muted">{d.topic.repoPath}</p>}

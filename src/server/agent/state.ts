@@ -5,6 +5,7 @@ import { isAvailable } from "@/lib/plan";
 import type { NodeStatus, PlanNodeView } from "@/lib/types";
 import { getScan, renderTree } from "../repo/scan";
 import { materialsText } from "../materials";
+import { semesterContext } from "../semester/context";
 
 /** Text blocks with these prefixes are context for the model and are hidden from the learner. */
 export const STATE_PREFIX = "[состояние]";
@@ -114,6 +115,9 @@ export function initialState(db: Db, sessionId: number): string {
     out.push("", "Вопросы, которые ученик отложил «на парковку» (можно ответить, когда уместно):");
     for (const p of parked) out.push(`- ${p.text}`);
   }
+
+  const semester = semesterContext(db, topic);
+  if (semester) out.push("", semester);
 
   const materials = materialsText(topic.id);
   if (materials) {

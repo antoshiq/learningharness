@@ -4,6 +4,7 @@ import { getDb, schema } from "@/server/db";
 import { handle, intParam, json } from "@/server/http";
 import { listMaterials } from "@/server/materials";
 import { usageTotals } from "@/server/sessions";
+import { forgetTopic, topicSemester } from "@/server/semester/modules";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -66,6 +67,7 @@ export const GET = (_req: Request, ctx: Ctx) =>
       materials: listMaterials(id),
       parking: db.select().from(schema.parking).where(eq(schema.parking.topicId, id)).orderBy(desc(schema.parking.id)).all(),
       usage: usageTotals({ topicId: id }),
+      semester: topicSemester(topic.semesterModuleId),
     });
   });
 
@@ -90,5 +92,7 @@ export const DELETE = (_req: Request, ctx: Ctx) =>
       tx.update(schema.briefs).set({ topicId: null }).where(eq(schema.briefs.topicId, id)).run();
       tx.delete(schema.topics).where(eq(schema.topics.id, id)).run();
     });
+    // A semester module whose topic is gone is prepared again when needed.
+    forgetTopic(id);
     return json({ ok: true });
   });

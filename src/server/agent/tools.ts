@@ -8,6 +8,7 @@ import { topoOrder, validatePlan } from "@/lib/plan";
 import { parsonsLines } from "@/lib/grading";
 import { MISCONCEPTION_TYPES, type Question, type SessionSummary } from "@/lib/types";
 import { listDir, readFile, searchCode } from "../repo/tools";
+import { MAX_READ_PAGES, readBookPages, searchBooks } from "../book-read";
 import { planStateText } from "./state";
 
 type Session = typeof schema.sessions.$inferSelect;
@@ -111,11 +112,23 @@ const SearchCode = z.object({
   regex: z.boolean().optional().describe("true — query это регулярное выражение; иначе точный текст"),
 });
 
+const ReadBook = z.object({
+  book_id: z.number().int().describe("id книги (число из bN в списке книг)"),
+  page_from: z.number().int(),
+  page_to: z.number().int().describe(`за один вызов — не больше ${MAX_READ_PAGES} страниц`),
+});
+const SearchBook = z.object({
+  query: z.string().min(1).describe("слова для поиска; ищется по началу слов, без учёта окончаний"),
+  book_id: z.number().int().optional().describe("искать только в этой книге"),
+});
+
 interface Spec {
   name: string;
   description: string;
   schema: z.ZodObject;
   repoOnly?: boolean;
+  /** Only for semester modules that have books. */
+  bookOnly?: boolean;
 }
 
 const SPECS: Spec[] = [
@@ -137,13 +150,15 @@ const SPECS: Spec[] = [
   { name: "read_file", description: "Прочитать файл репозитория с номерами строк.", schema: ReadFile, repoOnly: true },
   { name: "search_code", description: "Найти текст в файлах репозитория.", schema: SearchCode, repoOnly: true },
   { name: "save_repo_map", description: "Сохранить обзор проекта после анализа. Вызывается один раз, до диагностики.", schema: SaveRepoMap, repoOnly: true },
+  { name: "read_book", description: "Прочитать страницы книги семестра (текст со страницами).", schema: ReadBook, bookOnly: true },
+  { name: "search_book", description: "Найти в книгах семестра страницы со словами запроса: фрагменты и номера страниц.", schema: SearchBook, bookOnly: true },
 ];
 
-const specsFor = (topicKind: "topic" | "repo") => SPECS.filter((s) => !s.repoOnly || topicKind === "repo");
+const specsFor = (topicKind: "topic" | "repo", books = false) => SPECS.filter((s) => (!s.repoOnly || topicKind === "repo") && (!s.bookOnly || books));
 
 /** Tool definitions as JSON Schema, for the Messages and chat-completions APIs. */
-export function toolDefs(topicKind: "topic" | "repo"): ToolDef[] {
-  return specsFor(topicKind).map((s) => {
+export function toolDefs(topicKind: "topic" | "repo", books = false): ToolDef[] {
+  return specsFor(topicKind, books).map((s) => {
     const schemaJson = z.toJSONSchema(s.schema) as Record<string, unknown>;
     delete schemaJson.$schema;
     return { name: s.name, description: s.description, schema: schemaJson };
@@ -151,8 +166,8 @@ export function toolDefs(topicKind: "topic" | "repo"): ToolDef[] {
 }
 
 /** The same tools as Zod shapes, for the Claude Agent SDK. Cross-field rules are re-checked in executeTool. */
-export function toolShapes(topicKind: "topic" | "repo"): { name: string; description: string; shape: z.ZodRawShape }[] {
-  return specsFor(topicKind).map((s) => ({ name: s.name, description: s.description, shape: s.schema.shape }));
+export function toolShapes(topicKind: "topic" | "repo", books = false): { name: string; description: string; shape: z.ZodRawShape }[] {
+  return specsFor(topicKind, books).map((s) => ({ name: s.name, description: s.description, shape: s.schema.shape }));
 }
 
 function parse<T>(s: z.ZodType<T>, input: unknown): { ok: true; data: T } | { ok: false; error: string } {
@@ -233,7 +248,14 @@ function run(ctx: ToolCtx, name: string, toolUseId: string, input: unknown): Too
     case "set_plan": {
       const p = parse(SetPlan, input);
       if (!p.ok) return err(p.error);
-      const nodes = p.data.nodes.map((n) => ({ ...n, deps: n.deps ?? [], summary: n.summary ?? "" }));
+      // A semester module's ideas come from its program: none may be dropped or declared known without the checkpoint.
+      const inSemester = topic.semesterModuleId !== null;
+      const nodes = p.data.nodes.map((n) => ({ ...n, deps: n.deps ?? [], summary: n.summary ?? "", known: inSemester ? false : n.known }));
+      if (inSemester) {
+        const kept = new Set(nodes.map((n) => n.key));
+        const dropped = db.select({ key: schema.nodes.key }).from(schema.nodes).where(eq(schema.nodes.topicId, topic.id)).all().filter((n) => !kept.has(n.key));
+        if (dropped.length) return err(`Это модуль семестра: идеи программы убирать нельзя (${dropped.map((n) => n.key).join(", ")}). Можно добавлять новые и менять порядок.`);
+      }
       const problems = validatePlan(nodes);
       if (problems.length) return err("План отклонён: " + problems.join(" "));
       const order = topoOrder(nodes)!;
@@ -306,7 +328,37 @@ function run(ctx: ToolCtx, name: string, toolUseId: string, input: unknown): Too
       return p.ok ? { content: searchCode(topic.repoPath, p.data.query, p.data.glob, p.data.regex) } : err(p.error);
     }
 
+    case "read_book":
+    case "search_book": {
+      const ids = semesterBookIds(db, topic);
+      if (!ids.length) return err("У этой темы нет книг.");
+      if (name === "read_book") {
+        const p = parse(ReadBook, input);
+        if (!p.ok) return err(p.error);
+        if (!ids.includes(p.data.book_id)) return err(`Книги ${p.data.book_id} нет в семестре. Доступны: ${ids.join(", ")}.`);
+        return { content: readBookPages(p.data.book_id, p.data.page_from, p.data.page_to) };
+      }
+      const p = parse(SearchBook, input);
+      if (!p.ok) return err(p.error);
+      const hits = searchBooks(p.data.book_id && ids.includes(p.data.book_id) ? [p.data.book_id] : ids, p.data.query);
+      if (!hits.length) return { content: "Ничего не найдено. Попробуй другие слова или читай раздел по страницам." };
+      return { content: hits.map((h) => `- b${h.bookId} «${h.book}», стр. ${h.page}: ${h.snippet}`).join("\n") };
+    }
+
     default:
       return err(`Неизвестный инструмент "${name}".`);
   }
+}
+
+/** Ready books of the semester a module topic belongs to. */
+export function semesterBookIds(db: Db, topic: Topic): number[] {
+  if (!topic.semesterModuleId) return [];
+  const m = db.select({ semesterId: schema.semesterModules.semesterId }).from(schema.semesterModules).where(eq(schema.semesterModules.id, topic.semesterModuleId)).get();
+  if (!m) return [];
+  return db
+    .select({ id: schema.books.id })
+    .from(schema.books)
+    .where(and(eq(schema.books.semesterId, m.semesterId), eq(schema.books.status, "ready")))
+    .all()
+    .map((b) => b.id);
 }

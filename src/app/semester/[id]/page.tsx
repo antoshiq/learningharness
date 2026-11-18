@@ -279,7 +279,7 @@ export default function SemesterPage() {
   }, [load]);
 
   // While the server works, keep the page fresh.
-  const working = !!s && (s.running || (s.status === "preparing" && !s.error) || s.books.some((b) => b.status === "outlining"));
+  const working = !!s && (s.running || (s.status === "preparing" && !s.error) || s.books.some((b) => b.status === "outlining") || !!s.active?.preparing);
   useEffect(() => {
     if (!working) return;
     const t = setInterval(load, 2000);

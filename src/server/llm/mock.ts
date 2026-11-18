@@ -55,6 +55,17 @@ export function mockProvider(): LlmProvider {
             ),
           ]);
         }
+        if (req.system.startsWith("Ты готовишь модуль семестра")) {
+          // Two ideas per section: "Раздел N: title" lines of the request.
+          const text = req.messages.map((m) => m.content.filter(isText).map((b) => b.text).join("")).join("\n");
+          const ideas: { key: string; title: string; summary: string; deps: string[]; section: number }[] = [];
+          for (const m of text.matchAll(/^Раздел (\d+): (.+?)(?: — .*)?$/gm)) {
+            const n = Number(m[1]);
+            ideas.push({ key: `s${n}-a`, title: `${m[2]}: суть`, summary: "(тест)", deps: ideas.length ? [ideas[ideas.length - 1].key] : [], section: n });
+            ideas.push({ key: `s${n}-b`, title: `${m[2]}: применение`, summary: "(тест)", deps: [`s${n}-a`], section: n });
+          }
+          return done([say(JSON.stringify({ ideas, guide: [{ section: 1, summary: "(тест) главное", exercises: "№ 1–3, стр. 2" }] }))]);
+        }
         if (req.system.startsWith("Ты составляешь программу семестра")) {
           // One module per chapter of the outline (sections as its sections), or two modules for a bare topic.
           const text = req.messages.map((m) => m.content.filter(isText).map((b) => b.text).join("")).join("\n");

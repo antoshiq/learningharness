@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { KIND_LABEL, SELF_GRADED, type AnswerPayload, type DrillItem, type Outcome, type SelfGrade } from "@/lib/types";
 import { ResultCells } from "./Drill";
@@ -45,7 +45,47 @@ function Timer({ deadline, onExpire }: { deadline: number; onExpire: () => void 
  * Checkable answers are graded on the server as they come; free ones are
  * compared with the reference by the learner on the results screen.
  */
-export function Exam({ items, minutes, topicId, onRestart }: { items: DrillItem[]; minutes: number | null; topicId: number; onRestart: () => void }) {
+/** Score and per-idea results; null while free answers wait for the learner's grade. */
+function summarize(items: DrillItem[], answers: Answered[]): (ExamResult & { byNode: Map<string, { title: string; got: number; total: number }> }) | null {
+  const byNode = new Map<string, { title: string; got: number; total: number }>();
+  for (const it of items) {
+    // Keys of different topics may coincide in an exam over several modules.
+    const k = `${it.topic.id}:${it.node?.key ?? ""}`;
+    const row = byNode.get(k) ?? { title: it.node?.title ?? "Без идеи плана", got: 0, total: 0 };
+    row.total++;
+    row.got += points(answers.find((x) => x.item === it)?.outcome ?? null);
+    byNode.set(k, row);
+  }
+  if (answers.some((x) => x.outcome === null)) return null;
+  // Unanswered questions count as zero.
+  const score = answers.reduce((s, x) => s + points(x.outcome), 0);
+  return { pct: Math.round((score / items.length) * 100), details: [...byNode.entries()].map(([key, r]) => ({ key, ...r })), byNode };
+}
+
+export interface ExamResult {
+  pct: number;
+  /** Per idea: "topicId:nodeKey", title, points got and questions asked. */
+  details: { key: string; title: string; got: number; total: number }[];
+}
+
+export function Exam({
+  items,
+  minutes,
+  topicId,
+  onRestart,
+  onFinish,
+  after,
+}: {
+  items: DrillItem[];
+  minutes: number | null;
+  /** The topic the exam is about; null for an exam over several topics. */
+  topicId: number | null;
+  onRestart?: () => void;
+  /** Called once, when every answer is graded (a semester records it). */
+  onFinish?: (r: ExamResult) => void;
+  /** Shown in place of the usual buttons at the end. */
+  after?: React.ReactNode;
+}) {
   const [deadline] = useState(() => (minutes ? Date.now() + minutes * 60_000 : null));
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<Answered[]>([]);
@@ -54,6 +94,15 @@ export function Exam({ items, minutes, topicId, onRestart }: { items: DrillItem[
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [seeds] = useState(() => items.map(() => Math.floor(Math.random() * 2 ** 31)));
+
+  const reported = useRef(false);
+  useEffect(() => {
+    if (!finished || reported.current || !onFinish) return;
+    const r = summarize(items, answers);
+    if (!r) return;
+    reported.current = true;
+    onFinish({ pct: r.pct, details: r.details });
+  }, [finished, answers, items, onFinish]);
 
   const item = items[index];
   const finish = (expired = false) => {
@@ -139,16 +188,8 @@ export function Exam({ items, minutes, topicId, onRestart }: { items: DrillItem[
 
   // Results. Unanswered questions count as zero.
   const pending = answers.filter((x) => x.outcome === null).length;
-  const score = answers.reduce((s, x) => s + points(x.outcome), 0);
-  const pct = Math.round((score / items.length) * 100);
-  const byNode = new Map<string, { title: string; got: number; total: number }>();
-  for (const it of items) {
-    const k = it.node?.key ?? "";
-    const row = byNode.get(k) ?? { title: it.node?.title ?? "Без идеи плана", got: 0, total: 0 };
-    row.total++;
-    row.got += points(answers.find((x) => x.item === it)?.outcome ?? null);
-    byNode.set(k, row);
-  }
+  const pct = Math.round((answers.reduce((s, x) => s + points(x.outcome), 0) / items.length) * 100);
+  const byNode = summarize(items, answers.map((x) => (x.outcome === null ? { ...x, outcome: "skipped" as const } : x)))!.byNode;
   const weak = [...byNode.values()].filter((r) => r.got / r.total < 0.7);
   const wrong = answers.filter((x) => x.outcome === "wrong" || x.outcome === "partial");
 
@@ -246,18 +287,23 @@ export function Exam({ items, minutes, topicId, onRestart }: { items: DrillItem[
               </div>
             </details>
           )}
+          {after}
           <div className="flex flex-wrap gap-2">
             {wrong.length > 0 && (
-              <LinkButton href={`/mistakes?topic=${topicId}`} variant="primary">
+              <LinkButton href={topicId ? `/mistakes?topic=${topicId}` : "/mistakes"} variant={after ? "secondary" : "primary"}>
                 <Icon name="target" /> Работа над ошибками
               </LinkButton>
             )}
-            <Button onClick={onRestart}>
-              <Icon name="redo" /> Ещё экзамен
-            </Button>
-            <LinkButton href={`/topics/${topicId}`} variant="ghost">
-              К теме
-            </LinkButton>
+            {onRestart && (
+              <Button onClick={onRestart}>
+                <Icon name="redo" /> Ещё экзамен
+              </Button>
+            )}
+            {topicId && !after && (
+              <LinkButton href={`/topics/${topicId}`} variant="ghost">
+                К теме
+              </LinkButton>
+            )}
             <span className="hidden self-center text-xs text-muted sm:inline">
               <Kbd>Ctrl+Enter</Kbd> ответить
             </span>

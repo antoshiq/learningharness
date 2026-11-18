@@ -12,7 +12,7 @@ import { gradeAuto, normalizeOutput } from "@/lib/grading";
 import type { AnswerPayload, Outcome, Question, StreamEvent, TurnInput } from "@/lib/types";
 import { systemPrompt } from "./prompts";
 import { initialState, planStateText, STATE_PREFIX, SYSTEM_PREFIX } from "./state";
-import { executeTool, toolDefs } from "./tools";
+import { executeTool, semesterBookIds, toolDefs } from "./tools";
 import { runClaudeCodeTurn } from "./claude-code";
 import type { PendingState } from "../db/schema";
 
@@ -200,7 +200,7 @@ export async function runTurn(sessionId: number, input: TurnInput, emit: (e: Str
       const result = await chatAs("strong", session.kind, sessionId, {
         system: systemPrompt(session.kind, topic.kind),
         messages: session.messages,
-        tools: toolDefs(topic.kind),
+        tools: toolDefs(topic.kind, semesterBookIds(db, topic).length > 0),
         onText: (delta) => {
           streamed = true;
           emit({ type: "text", delta });
@@ -241,6 +241,7 @@ export async function runTurn(sessionId: number, input: TurnInput, emit: (e: Str
         if (tu.name === "read_file" || tu.name === "search_code" || tu.name === "list_dir") {
           emit({ type: "status", text: "Читаю репозиторий…" });
         }
+        if (tu.name === "read_book" || tu.name === "search_book") emit({ type: "status", text: "Читаю учебник…" });
         const out = executeTool(ctx, tu.name, tu.id, tu.input);
         if (out.pendingAttemptId !== undefined) {
           pending = { toolUseId: tu.id, attemptId: out.pendingAttemptId };

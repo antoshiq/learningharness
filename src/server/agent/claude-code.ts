@@ -29,7 +29,7 @@ import {
 import { DATA_DIR } from "../paths";
 import type { StreamEvent } from "@/lib/types";
 import { systemPrompt } from "./prompts";
-import { executeTool, toolShapes } from "./tools";
+import { executeTool, semesterBookIds, toolShapes } from "./tools";
 
 const SERVER = "tutor";
 const MAX_TURNS = 60;
@@ -224,7 +224,7 @@ async function attempt(sessionId: number, cc: { sessionId: string; sent: number 
     results = [];
   };
 
-  const specs = toolShapes(topic.kind);
+  const specs = toolShapes(topic.kind, semesterBookIds(db, topic).length > 0);
   const server = createSdkMcpServer({
     name: SERVER,
     version: "1.0.0",
@@ -235,6 +235,7 @@ async function attempt(sessionId: number, cc: { sessionId: string; sent: number 
         if (s.name === "read_file" || s.name === "search_code" || s.name === "list_dir") {
           emit({ type: "status", text: "Читаю репозиторий…" });
         }
+        if (s.name === "read_book" || s.name === "search_book") emit({ type: "status", text: "Читаю учебник…" });
         const id = `cc_${Date.now().toString(36)}_${seq++}`;
         calls.push({ type: "tool_use", id, name: s.name, input: args });
         const out = executeTool(ctx, s.name, id, args);
