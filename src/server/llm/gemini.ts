@@ -4,7 +4,7 @@
 // off and its system prompt is replaced with ours, so it only writes replies.
 import fs from "node:fs";
 import path from "node:path";
-import { checkModel, envWithout, finish, preparePrompt, runJsonLines, streamer, tempFile, workDir } from "./cli";
+import { checkModel, envWithout, finish, imageFiles, preparePrompt, runJsonLines, streamer, tempFile, workDir } from "./cli";
 import { LlmError, type LlmProvider, type LlmRequest, type LlmResult } from "./types";
 
 export const GEMINI_MODELS = ["auto", "pro", "flash", "flash-lite", "gemini-3.1-pro-preview", "gemini-3.5-flash", "gemini-2.5-pro"];
@@ -42,8 +42,12 @@ function describe(detail: string): string {
 async function chat(req: LlmRequest): Promise<LlmResult> {
   const model = req.model.trim();
   checkModel(model, "Gemini CLI");
-  const { system, prompt } = preparePrompt(req);
+  const { system, prompt: text } = preparePrompt(req);
   const systemFile = tempFile("gemini-prompts", system);
+  // Photos are put inside the working folder and referenced with @: Gemini CLI reads them as pictures.
+  const cwd = geminiDir();
+  const images = imageFiles(req, path.join("gemini", "img"));
+  const prompt = images.files.length ? `${text}\n\n${images.files.map((f) => `@${path.relative(cwd, f).replace(/\\/g, "/")}`).join(" ")}` : text;
   const live = streamer(req);
 
   let reply = "";
@@ -55,7 +59,7 @@ async function chat(req: LlmRequest): Promise<LlmResult> {
       bin: process.env.TUTOR_GEMINI_PATH || "gemini",
       args: ["--output-format", "stream-json", "--skip-trust", "--model", model],
       input: prompt,
-      cwd: geminiDir(),
+      cwd,
       env: {
         // Keys in the environment would switch it away from the Google login.
         ...envWithout(["GEMINI_API_KEY", "GOOGLE_API_KEY"]),
@@ -81,6 +85,7 @@ async function chat(req: LlmRequest): Promise<LlmResult> {
     throw e instanceof LlmError ? e : new LlmError(describe(e instanceof Error ? e.message : String(e)));
   } finally {
     systemFile.remove();
+    images.remove();
   }
 
   return finish(

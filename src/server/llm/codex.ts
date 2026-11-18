@@ -3,7 +3,7 @@
 // owner's ChatGPT account. Codex is a coding agent; here it is kept to plain
 // replies: no user config, a read-only sandbox in an empty folder, no web
 // search, and our own instructions in place of its built-in ones.
-import { checkModel, envWithout, finish, preparePrompt, runJsonLines, tempFile, workDir } from "./cli";
+import { checkModel, envWithout, finish, imageFiles, preparePrompt, runJsonLines, tempFile, workDir } from "./cli";
 import { LlmError, type LlmProvider, type LlmRequest, type LlmResult } from "./types";
 
 export const CODEX_MODELS = ["default", "gpt-6.2-sol", "gpt-6.1-sol", "gpt-6-sol", "gpt-5.5"];
@@ -27,6 +27,8 @@ async function chat(req: LlmRequest): Promise<LlmResult> {
   if (model !== "default") checkModel(model, "Codex");
   const { system, prompt } = preparePrompt(req);
   const instructions = tempFile("codex-prompts", system);
+  // Photos (of a solution) go as files: `codex exec --image`.
+  const images = imageFiles(req, "codex-images");
 
   const texts: string[] = [];
   const failures: string[] = [];
@@ -48,6 +50,7 @@ async function chat(req: LlmRequest): Promise<LlmResult> {
       "-c",
       "web_search='disabled'",
       ...(model !== "default" ? ["-m", model] : []),
+      ...images.files.flatMap((f) => ["--image", f]),
       "-", // read the prompt from stdin
     ];
     const r = await runJsonLines({
@@ -74,6 +77,7 @@ async function chat(req: LlmRequest): Promise<LlmResult> {
     throw e instanceof LlmError ? e : new LlmError(describe(e instanceof Error ? e.message : String(e)));
   } finally {
     instructions.remove();
+    images.remove();
   }
 
   return finish(

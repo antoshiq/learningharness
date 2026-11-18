@@ -2,6 +2,7 @@
 // (Ollama, LM Studio, vLLM, any other compatible server).
 import {
   LlmError,
+  isImage,
   isText,
   isToolResult,
   isToolUse,
@@ -15,6 +16,7 @@ import {
 
 type OaiMsg =
   | { role: "system" | "user"; content: string }
+  | { role: "user"; content: ({ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } })[] }
   | {
       role: "assistant";
       content: string | null;
@@ -41,7 +43,14 @@ export function toOpenAiMessages(system: string, messages: ChatMsg[]): OaiMsg[] 
         out.push({ role: "tool", tool_call_id: b.tool_use_id, content: (b.is_error ? "ОШИБКА: " : "") + b.content });
       }
       const text = m.content.filter(isText).map((b) => b.text).join("\n\n");
-      if (text) out.push({ role: "user", content: text });
+      const images = m.content.filter(isImage);
+      if (images.length) {
+        // Pictures go as data URLs: OpenAI-compatible vision models (OpenRouter, local servers) take them so.
+        out.push({
+          role: "user",
+          content: [...images.map((b) => ({ type: "image_url" as const, image_url: { url: `data:${b.source.media_type};base64,${b.source.data}` } })), ...(text ? [{ type: "text" as const, text }] : [])],
+        });
+      } else if (text) out.push({ role: "user", content: text });
     }
   }
   return out;

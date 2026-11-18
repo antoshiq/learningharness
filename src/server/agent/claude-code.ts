@@ -7,12 +7,13 @@
 // the transcript, pending questions and mastery work exactly as with an API key.
 import fs from "node:fs";
 import path from "node:path";
-import { createSdkMcpServer, query, tool, type Options } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, query, tool, type Options, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { eq } from "drizzle-orm";
 import { getRoles } from "../config";
 import { getDb, schema } from "../db";
 import type { PendingState } from "../db/schema";
 import {
+  imagesOf,
   isText,
   isToolResult,
   isToolUse,
@@ -341,7 +342,14 @@ export function claudeCodeProvider(): LlmProvider {
       let usage: Usage | undefined;
       let failure: string | null = null;
       try {
-        const q = query({ prompt, options: { ...baseOptions(req.model, req.system), persistSession: false, maxTurns: 1 } });
+        // Photos travel inside the user message, as image blocks.
+        const images = imagesOf(req.messages);
+        const input: string | AsyncIterable<SDKUserMessage> = images.length
+          ? (async function* () {
+              yield { type: "user", parent_tool_use_id: null, message: { role: "user", content: [...images, { type: "text", text: prompt }] } } as SDKUserMessage;
+            })()
+          : prompt;
+        const q = query({ prompt: input, options: { ...baseOptions(req.model, req.system), persistSession: false, maxTurns: 1 } });
         for await (const m of q) {
           if (m.type === "stream_event" && !m.parent_tool_use_id) {
             const ev = m.event;

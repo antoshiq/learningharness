@@ -3,6 +3,7 @@
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { Markdown } from "@/components/Markdown";
+import { PhotoButton } from "@/components/PhotoButton";
 import { Badge, Button, Card, cx, Dots, Icon, inputClass, LinkButton, Loading, Notice, Page, Segmented, TopNav } from "@/components/ui";
 import { api } from "@/lib/api";
 import { gradeOf } from "@/lib/semester";
@@ -172,6 +173,7 @@ export default function HomeworkPage() {
                 ) : (
                   <div className="min-h-72 rounded-sm border border-border px-3 py-2">{answer.trim() ? <Markdown text={answer} /> : <p className="text-sm text-muted">Пока пусто.</p>}</div>
                 )}
+                <PhotoButton context={h.task} onText={(t) => edit(answer.trim() ? `${answer.trimEnd()}\n\n${t}` : t)} />
                 <div className="flex flex-wrap items-center gap-3">
                   <Button variant="primary" onClick={submit} disabled={busy || answer.trim().length < 20}>
                     {busy ? (

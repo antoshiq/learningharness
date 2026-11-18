@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { DATA_DIR } from "../paths";
-import { LlmError, type Block, type LlmRequest, type LlmResult, type LlmUsage } from "./types";
+import { imagesOf, LlmError, type Block, type LlmRequest, type LlmResult, type LlmUsage } from "./types";
 import { parseReply, renderConversation, toolInstructions, VisibleText } from "./text-tools";
 
 const TIMEOUT_MS = 10 * 60_000;
@@ -110,6 +110,18 @@ export function envWithout(keys: string[]): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const k of keys) delete env[k];
   return env;
+}
+
+const EXT: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
+
+/** The request's pictures written to files in `dir` (the programs take pictures as files). */
+export function imageFiles(req: LlmRequest, dir: string): { files: string[]; remove: () => void } {
+  const files = imagesOf(req.messages).map((img) => {
+    const file = path.join(workDir(dir), `${randomUUID()}.${EXT[img.source.media_type] ?? "jpg"}`);
+    fs.writeFileSync(file, Buffer.from(img.source.data, "base64"));
+    return file;
+  });
+  return { files, remove: () => files.forEach((f) => fs.rmSync(f, { force: true })) };
 }
 
 /** The pieces every text-only connection needs: system prompt, prompt and reply parsing. */

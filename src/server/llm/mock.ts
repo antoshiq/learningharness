@@ -22,6 +22,12 @@ export function mockProvider(): LlmProvider {
         usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0, cost: 0 },
       });
       if (!req.tools?.length) {
+        // A photo of a solution: the scripted model "reads" it.
+        if (req.messages.some((m) => m.content.some((b) => b.type === "image"))) {
+          // A model without vision answers like this; the app must fall back to OCR.
+          if (req.messages.some((m) => m.content.some((b) => isText(b) && b.text.includes("(слепая модель)")))) return done([say("Я не вижу изображения в сообщении.")]);
+          return done([say("$x^2 - 4 = 0$\n$x = \\pm 2$ (тест)")]);
+        }
         // Quick overview: pick files, write the overview, open a thesis.
         if (req.system.startsWith("Ты помогаешь разобраться в проекте")) return done([say('["README.md"]')]);
         if (req.system.startsWith("Ты составляешь краткий экскурс")) {

@@ -8,6 +8,7 @@ import { openInSandbox } from "@/lib/sandbox";
 import { CodeEditor } from "./CodeEditor";
 import { EditorFrame, toolButton } from "./EditorTools";
 import { Markdown } from "./Markdown";
+import { PhotoButton } from "./PhotoButton";
 import { Badge, Button, cx, Dots, Icon, inputClass, isKey, isSubmitKey, Kbd, KeyHandler, Mark, Notice, Segmented } from "./ui";
 
 export type QItem = Extract<TranscriptItem, { type: "question" }>;
@@ -300,6 +301,7 @@ export function ActiveQuestion({
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
+          <PhotoButton context={q.prompt} onText={(t) => setText((cur) => (cur.trim() ? `${cur.trimEnd()}\n\n${t}` : t))} />
           {q.kind === "math" && text.includes("$") && (
             <div className="rounded-md border border-dashed border-border-strong px-3 py-2">
               <div className="mb-1 text-xs text-muted">Как это выглядит</div>

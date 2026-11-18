@@ -18,12 +18,17 @@ export interface ToolResultBlock {
   content: string;
   is_error?: boolean;
 }
+/** A picture in a user message (a photo of a solution), in the Anthropic shape. */
+export interface ImageBlock {
+  type: "image";
+  source: { type: "base64"; media_type: "image/jpeg" | "image/png" | "image/webp" | "image/gif"; data: string };
+}
 /** Any other provider-specific block (e.g. Anthropic `thinking`), kept opaque. */
 export interface OpaqueBlock {
   type: string;
   [k: string]: unknown;
 }
-export type Block = TextBlock | ToolUseBlock | ToolResultBlock | OpaqueBlock;
+export type Block = TextBlock | ToolUseBlock | ToolResultBlock | ImageBlock | OpaqueBlock;
 
 export interface ChatMsg {
   role: "user" | "assistant";
@@ -73,6 +78,10 @@ export interface LlmProvider {
 export const isText = (b: Block): b is TextBlock => b.type === "text" && typeof (b as TextBlock).text === "string";
 export const isToolUse = (b: Block): b is ToolUseBlock => b.type === "tool_use";
 export const isToolResult = (b: Block): b is ToolResultBlock => b.type === "tool_result";
+export const isImage = (b: Block): b is ImageBlock => b.type === "image" && !!(b as Partial<ImageBlock>).source?.data;
+
+/** Pictures of all messages, in order (connections that take files attach them separately). */
+export const imagesOf = (messages: ChatMsg[]): ImageBlock[] => messages.flatMap((m) => m.content.filter(isImage));
 
 export class LlmError extends Error {
   constructor(
