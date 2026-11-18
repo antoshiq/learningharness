@@ -5,6 +5,7 @@ import { and, eq, isNotNull } from "drizzle-orm";
 import { parsonsLines } from "@/lib/grading";
 import type { Question } from "@/lib/types";
 import { getDb, schema } from "./db";
+import { questionKey } from "./questions";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -68,13 +69,13 @@ export function ankiExport(topicId: number): { name: string; body: string; count
     .where(and(eq(schema.attempts.topicId, topicId), isNotNull(schema.attempts.answer)))
     .all()) {
     // predict_output has no stored output to put on the back; leave those to the app.
-    if (a.misconceptionType === "invalid_question" || a.question.kind === "predict_output" || seen.has(a.question.prompt)) continue;
-    seen.add(a.question.prompt);
+    if (a.misconceptionType === "invalid_question" || a.question.kind === "predict_output" || seen.has(questionKey(a.question))) continue;
+    seen.add(questionKey(a.question));
     questions.push(a.question);
   }
   for (const c of db.select().from(schema.cards).where(eq(schema.cards.topicId, topicId)).all()) {
-    if (seen.has(c.question.prompt)) continue;
-    seen.add(c.question.prompt);
+    if (seen.has(questionKey(c.question))) continue;
+    seen.add(questionKey(c.question));
     questions.push(c.question);
   }
   if (!questions.length) throw new Error("В теме пока нет вопросов для экспорта");

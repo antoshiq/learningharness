@@ -143,6 +143,7 @@ export default function BriefDetailPage() {
               </LinkButton>
             </div>
 
+            {carding && <p className="appear mt-2 text-xs text-muted">Модель составляет карточки, обычно это 15–60 секунд.</p>}
             {cardsMsg && (
               <div className="enter mt-3">
                 <Notice tone="ok">

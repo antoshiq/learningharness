@@ -2,6 +2,12 @@
 // provider can make them): cards from an overview or cheat sheet, exam questions.
 import type { Language, Purpose, Question } from "@/lib/types";
 
+/**
+ * Identity of a question for removing repeats: "Что напечатает программа?" is
+ * the same wording for many questions that differ only in their code.
+ */
+export const questionKey = (q: { prompt: string; code?: string; options?: string[] }) => `${q.prompt}\n${q.code ?? ""}\n${(q.options ?? []).join("|")}`;
+
 /** What the model is asked to produce; the parser accepts exactly this. */
 export const QUESTION_FORMAT = `Ответь только JSON-массивом объектов, без текста до и после. Виды вопросов:
 - выбор ответа: {"kind":"choice","prompt":"…","options":["…","…","…","…"],"correct_option":1,"explanation":"почему так"}

@@ -210,17 +210,33 @@ const numbered = (s: string) =>
     .map((l, i) => `${String(i + 1).padStart(4)}│ ${l}`)
     .join("\n");
 
+/** A file name for pasted code, by what the code looks like; never clashes with attached files. */
+export function pastedName(code: string, taken: string[]): string {
+  const ext = /^\s*(def |class |import |from \S+ import|print\(|if __name__)/m.test(code)
+    ? ".py"
+    : /\b(function|const|let|=>|console\.log|require\(|export )/.test(code)
+      ? ".js"
+      : /#include|int main\s*\(/.test(code)
+        ? ".cpp"
+        : /\b(public class|System\.out)/.test(code)
+          ? ".java"
+          : ".txt";
+  let name = `main${ext}`;
+  for (let i = 2; taken.includes(name); i++) name = `main${i}${ext}`;
+  return name;
+}
+
 async function fromReview(input: BriefInput, emit: (e: StreamEvent) => void): Promise<Material> {
   const files: { name: string; content: string }[] = [];
   if (input.uploads?.some((u) => u.base64)) emit({ type: "status", text: "Читаю файлы…" });
   for (const u of input.uploads ?? []) files.push(await uploadText(u));
   const pasted = (input.code ?? "").trim();
-  if (pasted) files.unshift({ name: "вставленный код", content: pasted });
+  if (pasted) files.unshift({ name: pastedName(pasted, files.map((f) => f.name)), content: pasted });
   if (!files.length) throw new Error("Вставь код или приложи файлы");
   if (files.reduce((n, f) => n + f.content.length, 0) > MAX_UPLOAD_CHARS) throw new Error("Слишком много кода для одного разбора: выбери главное");
   const { text, used } = pack(files.map((f) => ({ name: f.name, content: numbered(f.content) })), BUDGET[input.depth]);
   const focus = (input.topic ?? "").trim();
-  const first = files[0].name === "вставленный код" ? "код" : files[0].name;
+  const first = pasted ? "код" : files[0].name;
   return {
     title: `Разбор: ${focus || first}${files.length > 1 ? ` и ещё ${files.length - 1}` : ""}`.slice(0, 200),
     source: files.map((f) => f.name).join(", "),

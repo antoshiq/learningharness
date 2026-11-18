@@ -92,6 +92,9 @@ export default function ExamPage() {
             <Button variant="primary" onClick={start} disabled={busy}>
               <Icon name="play" /> {busy ? "Собираю вопросы…" : "Начать экзамен"}
             </Button>
+            {busy && generate && (
+              <p className="appear text-xs text-muted">Если своих вопросов не хватает, модель составляет новые: это может занять одну–три минуты. Страницу можно не обновлять.</p>
+            )}
           </Card>
         )}
       </Page>

@@ -71,6 +71,7 @@ export function CardsTab({ topicId, hasNotes }: { topicId: number; hasNotes: boo
         Карточки — вопросы не из уроков: из экскурса, конспекта или экзамена. У каждой своё расписание повторения. Экспорт в Anki забирает и вопросы уроков: в Anki открой «Файл →
         Импорт» и выбери скачанный файл, колода создастся сама.
       </p>
+      {busy && <p className="appear text-xs text-muted">Модель составляет карточки, обычно это 15–60 секунд.</p>}
       {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
       {cards === null ? (
         <Loading />

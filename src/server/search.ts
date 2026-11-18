@@ -1,6 +1,7 @@
 // Search across everything the learner has: topics, overviews, cheat sheets,
 // questions, cards, parked thoughts and project conversations.
 import { getDb, schema } from "./db";
+import { questionKey } from "./questions";
 
 export interface SearchHit {
   kind: "topic" | "brief" | "notes" | "question" | "card" | "parking" | "ask";
@@ -46,8 +47,8 @@ export function search(query: string): SearchHit[] {
   }
   const seen = new Set<string>();
   for (const a of db.select().from(schema.attempts).all()) {
-    if (a.topicId == null || a.misconceptionType === "invalid_question" || seen.has(a.question.prompt)) continue;
-    seen.add(a.question.prompt);
+    if (a.topicId == null || a.misconceptionType === "invalid_question" || seen.has(questionKey(a.question))) continue;
+    seen.add(questionKey(a.question));
     const s = match(`${a.question.prompt}\n${a.question.explanation ?? ""}\n${a.misconception ?? ""}`, words);
     if (s) push({ kind: "question", title: `Вопрос: ${title.get(a.topicId) ?? ""}`, snippet: s, href: `/topics/${a.topicId}?tab=mistakes` });
   }

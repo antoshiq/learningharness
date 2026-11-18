@@ -10,6 +10,7 @@ import { SELF_GRADED, type AnswerPayload, type DrillItem, type Outcome, type Que
 import { dueCards, rateCard, type CardRow } from "./cards";
 import { getDb, schema } from "./db";
 import { applyRating } from "./mastery";
+import { questionKey } from "./questions";
 
 type AttemptRow = typeof schema.attempts.$inferSelect;
 export type DrillMode = "review" | "mistakes" | "exam";
@@ -189,7 +190,7 @@ export function openMistakes(topicId?: number): DrillItem[] {
   // The same question can come back in a later lesson; keep its newest attempt only.
   const seen = new Set<string>();
   const unique = rows.filter((a) => {
-    const k = `${a.topicId}:${a.question.prompt}`;
+    const k = `${a.topicId}:${questionKey(a.question)}`;
     if (seen.has(k)) return false;
     seen.add(k);
     return true;

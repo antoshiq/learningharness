@@ -9,7 +9,7 @@ import { chatAs } from "./llm";
 import { isText } from "./llm/types";
 import { attemptItem, cardItem, reusable } from "./practice";
 import { materialsText } from "./materials";
-import { parseQuestions, QUESTION_FORMAT } from "./questions";
+import { parseQuestions, QUESTION_FORMAT, questionKey } from "./questions";
 
 const EXAM_SYSTEM = `Ты составляешь экзамен по теме, которую ученик изучает. Вопросы должны проверять понимание и умение применить, а не память на формулировки; от простого к сложному. Распредели вопросы по идеям плана, указывая node_key у каждого. По-русски.
 
@@ -42,13 +42,13 @@ export async function buildExam(topicId: number, count: number, generate: boolea
     .orderBy(desc(schema.attempts.id))
     .all()
     .filter(reusable)) {
-    if (seenPrompts.has(a.question.prompt)) continue;
-    seenPrompts.add(a.question.prompt);
+    if (seenPrompts.has(questionKey(a.question))) continue;
+    seenPrompts.add(questionKey(a.question));
     add(a.nodeKey ?? "", attemptItem(a, topic.title, a.nodeKey ? (titles.get(a.nodeKey) ?? null) : null));
   }
   for (const c of db.select().from(schema.cards).where(eq(schema.cards.topicId, topicId)).all()) {
-    if (seenPrompts.has(c.question.prompt)) continue;
-    seenPrompts.add(c.question.prompt);
+    if (seenPrompts.has(questionKey(c.question))) continue;
+    seenPrompts.add(questionKey(c.question));
     add(c.nodeKey ?? "", cardItem(c, topic.title, c.nodeKey ? (titles.get(c.nodeKey) ?? null) : null));
   }
 

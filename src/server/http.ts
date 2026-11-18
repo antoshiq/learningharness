@@ -6,7 +6,8 @@ export const json = (data: unknown, status = 200) => Response.json(data, { statu
 
 export function errorResponse(e: unknown): Response {
   if (e instanceof TurnError) return json({ error: e.message }, e.status);
-  if (e instanceof LlmError) return json({ error: e.message }, 502);
+  // The daily spending cap answers 429; any other model failure is the provider's (502).
+  if (e instanceof LlmError) return json({ error: e.message }, e.status === 429 ? 429 : 502);
   const message = e instanceof Error ? e.message : String(e);
   return json({ error: message }, 400);
 }

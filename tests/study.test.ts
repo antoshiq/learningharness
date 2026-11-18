@@ -92,6 +92,16 @@ describe("plan to a date", () => {
   });
 });
 
+describe("questions told apart", () => {
+  it("does not merge questions with the same wording and different code", async () => {
+    const { questionKey } = await import("@/server/questions");
+    const a = { prompt: "Что напечатает программа?", code: "print(1)" };
+    const b = { prompt: "Что напечатает программа?", code: "print(2)" };
+    expect(questionKey(a)).not.toBe(questionKey(b));
+    expect(questionKey(a)).toBe(questionKey({ ...a }));
+  });
+});
+
 describe("video and code", () => {
   it("reads YouTube links and subtitle files", async () => {
     const { youtubeId, subtitlesToText } = await import("@/server/youtube");
@@ -116,7 +126,10 @@ describe("video and code", () => {
     const b = brief.getBrief(id)!;
     expect(b.kind).toBe("review");
     expect(b.title).toBe("Разбор: ошибки");
-    expect(b.materials?.[0].name).toBe("вставленный код");
+    // Pasted code gets a real file name, so "main.py:2" in the review points somewhere.
+    expect(b.materials?.[0].name).toBe("main.py");
+    expect(brief.pastedName("const x = 1;", [])).toBe("main.js");
+    expect(brief.pastedName("def f(): pass", ["main.py"])).toBe("main2.py");
     await expect(brief.writeBrief(brief.checkInput({ kind: "review" }), () => {})).rejects.toThrow(/Вставь код/);
   });
 });
