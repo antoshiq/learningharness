@@ -102,6 +102,11 @@ function ModuleActions({ s, m, onChange }: { s: SemesterView; m: ModuleView; onC
       <LinkButton small variant="ghost" href={`/topics/${m.topicId}`}>
         Модуль
       </LinkButton>
+      {(m.ideas?.studied ?? 0) > 0 && (
+        <LinkButton small variant="ghost" href={`/oral?topic=${m.topicId}`}>
+          Устно
+        </LinkButton>
+      )}
       {m.status === "passed" && (
         <LinkButton small variant="ghost" href={`/explain?topic=${m.topicId}`}>
           <Icon name="chat" size={14} /> Объяснить

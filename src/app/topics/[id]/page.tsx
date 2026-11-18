@@ -419,6 +419,11 @@ export default function TopicPage() {
           <LinkButton href={`/exam?topic=${d.topic.id}`}>
             <Icon name="check" /> Экзамен
           </LinkButton>
+          {d.plan.length > 0 && (
+            <LinkButton href={`/oral?topic=${d.topic.id}`} variant="ghost">
+              <Icon name="chat" /> Устный экзамен
+            </LinkButton>
+          )}
           <LinkButton href={`/explain?topic=${d.topic.id}`} variant="ghost">
             <Icon name="chat" /> Объясни своими словами
           </LinkButton>

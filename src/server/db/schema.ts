@@ -474,3 +474,32 @@ export const semesterHomework = sqliteTable(
   },
   (t) => [index("semester_homework_semester").on(t.semesterId)],
 );
+
+export interface OralTurn {
+  role: "examiner" | "student";
+  text: string;
+  /** examiner: the idea the question is about */
+  idea?: string;
+  at: number;
+}
+
+export interface OralResult {
+  score: number;
+  feedback: string;
+  ideas: { key: string; title: string; verdict: "correct" | "partial" | "wrong"; comment: string }[];
+}
+
+/** An oral exam: the examiner asks, the learner answers by voice (or text), the tutor grades the talk. */
+export const oralExams = sqliteTable(
+  "oral_exams",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    topicId: integer("topic_id").notNull(),
+    turns: text("turns", { mode: "json" }).$type<OralTurn[]>().notNull(),
+    status: text("status").$type<"active" | "done">().notNull().default("active"),
+    result: text("result", { mode: "json" }).$type<OralResult | null>(),
+    createdAt: integer("created_at").notNull(),
+    finishedAt: integer("finished_at"),
+  },
+  (t) => [index("oral_exams_topic").on(t.topicId)],
+);

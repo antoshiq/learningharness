@@ -64,6 +64,18 @@ export function mockProvider(): LlmProvider {
         if (req.system.startsWith("Ты составляешь домашнее задание")) {
           return done([say(JSON.stringify({ title: "(тест) Домашнее задание", task: "Докажите, что $a + b = b + a$.", rubric: [{ criterion: "Верная идея", points: 6 }, { criterion: "Аккуратное оформление", points: 4 }] }))]);
         }
+        if (req.system.startsWith("Ты принимаешь устный экзамен")) {
+          // Two questions on the first idea, then the end.
+          const text = req.messages.map((m) => m.content.filter(isText).map((b) => b.text).join("")).join("\n");
+          const key = /^- ([a-z0-9-]+):/m.exec(text)?.[1] ?? "x";
+          const answers = (text.match(/^Ученик:/gm) ?? []).length;
+          return done([say(JSON.stringify(answers >= 2 ? { say: "(тест) Спасибо, экзамен окончен.", done: true } : { say: `(тест) Вопрос ${answers + 1}: объясни своими словами.`, idea: key, done: false }))]);
+        }
+        if (req.system.startsWith("Ты оцениваешь устный экзамен")) {
+          const text = req.messages.map((m) => m.content.filter(isText).map((b) => b.text).join("")).join("\n");
+          const key = /^- ([a-z0-9-]+):/m.exec(text)?.[1] ?? "x";
+          return done([say(JSON.stringify({ score: 80, feedback: "(тест) Хорошо.", ideas: [{ key, verdict: "correct", comment: "(тест) ясно" }] }))]);
+        }
         if (req.system.startsWith("Ты пересматриваешь оценку")) {
           // The objection is right about the layout, wrong about the idea: one criterion up, one (wrongly) down.
           return done([say(JSON.stringify({ scores: [{ criterion: "Верная идея", got: 3, comment: "(тест) без изменений" }, { criterion: "Аккуратное оформление", got: 4, comment: "(тест) ученик прав" }], feedback: "Оценка повышена: (тест)." }))]);
