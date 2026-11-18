@@ -67,6 +67,7 @@ const ICONS = {
   compass: "M8 14.5a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13zM10.5 5.5l-1.4 3.6-3.6 1.4 1.4-3.6 3.6-1.4z",
   contrast: "M8 14.5a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13zM8 1.5v13M8 4h4M8 7h5.5M8 10h5M8 13h2.5",
   keyboard: "M1.5 4h13v8h-13zM4 6.5h.01M6.5 6.5h.01M9 6.5h.01M11.5 6.5h.01M5 9.5h6",
+  cap: "M1 6l7-3 7 3-7 3-7-3zM4 7.3v3.4c1.1 1.1 2.5 1.8 4 1.8s2.9-.7 4-1.8V7.3M15 6v4.5",
 } as const;
 export type IconName = keyof typeof ICONS;
 
@@ -150,6 +151,10 @@ export function PanelTitle({ children, right }: { children: ReactNode; right?: R
     </div>
   );
 }
+
+/** inputClass without the full width, for small inline fields (numbers, selects in a row). */
+export const fieldClass =
+  "rounded-sm border border-border-strong bg-input px-2.5 py-2 text-text placeholder:text-muted/80 transition-[border-color,box-shadow] duration-150 focus:border-accent focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_22%,transparent)] focus:outline-none sm:py-1.5";
 
 export const inputClass =
   "w-full rounded-sm border border-border-strong bg-input px-2.5 py-2 text-text placeholder:text-muted/80 transition-[border-color,box-shadow] duration-150 focus:border-accent focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_22%,transparent)] focus:outline-none sm:py-1.5";

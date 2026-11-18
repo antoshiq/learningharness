@@ -14,6 +14,8 @@ export const topics = sqliteTable("topics", {
   kind: text("kind").$type<"topic" | "repo">().notNull().default("topic"),
   repoPath: text("repo_path"),
   repoMap: text("repo_map"),
+  /** Set when the topic is a module of a semester: lessons then follow its program and books. */
+  semesterModuleId: integer("semester_module_id"),
   /** Cheat sheet written by the tutor from what was learned (Markdown). */
   notes: text("notes"),
   /** The quick overview the learner read before starting this topic (Markdown). */
@@ -296,6 +298,8 @@ export const books = sqliteTable(
     chars: integer("chars").notNull().default(0),
     status: text("status").$type<BookStatus>().notNull().default("reading"),
     outlineSource: text("outline_source").$type<OutlineSource>(),
+    /** PDF bookmarks or Markdown headings found while reading, kept until the outline is built. */
+    bookmarks: text("bookmarks", { mode: "json" }).$type<{ title: string; level: number; page: number }[] | null>(),
     error: text("error"),
     createdAt: integer("created_at").notNull(),
   },
@@ -329,4 +333,130 @@ export const bookSections = sqliteTable(
     summary: text("summary"),
   },
   (t) => [index("book_sections_book").on(t.bookId, t.idx)],
+);
+
+// ---------------------------------------------------------------------------
+// Semester: a whole course taken to the end. A program (parts, modules,
+// sections) is built from books and/or a topic with a level; each module
+// becomes a topic with lessons, closed by a checkpoint; cumulative exams,
+// homework and a grade book on top.
+// ---------------------------------------------------------------------------
+
+export type SemesterLevel = "base" | "standard" | "advanced";
+export type SemesterStatus = "preparing" | "draft" | "active" | "finished";
+
+export interface ProgramSection {
+  title: string;
+  summary: string;
+  /** book_sections ids this section is taught from; empty = not in the learner's materials. */
+  refs: number[];
+}
+
+export interface Prereq {
+  key: string;
+  title: string;
+  summary: string;
+}
+
+export const semesters = sqliteTable("semesters", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  title: text("title").notNull(),
+  /** What the learner asked for: "матанализ, полный курс". May be empty when only books are given. */
+  request: text("request").notNull().default(""),
+  level: text("level").$type<SemesterLevel>().notNull(),
+  goal: text("goal").notNull().default(""),
+  weeks: integer("weeks").notNull(),
+  hoursPerWeek: integer("hours_per_week").notNull(),
+  /** Local midnight of the first day. */
+  startDate: integer("start_date").notNull(),
+  status: text("status").$type<SemesterStatus>().notNull(),
+  /** What preparation is doing right now, for the progress view. */
+  step: text("step"),
+  error: text("error"),
+  /** The model's estimate of the whole program. */
+  estimateHours: real("estimate_hours"),
+  prereqs: text("prereqs", { mode: "json" }).$type<Prereq[]>().notNull(),
+  /** Honest remarks about the program: volume, what is missing, what was added. */
+  notes: text("notes", { mode: "json" }).$type<string[]>().notNull(),
+  /** Books to get, suggested when the semester has none. */
+  recommended: text("recommended", { mode: "json" }).$type<string[]>().notNull(),
+  createdAt: integer("created_at").notNull(),
+  startedAt: integer("started_at"),
+  finishedAt: integer("finished_at"),
+});
+
+export const semesterModules = sqliteTable(
+  "semester_modules",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    semesterId: integer("semester_id").notNull(),
+    idx: integer("idx").notNull(),
+    /** Large courses are split into parts; modules of one part share the name. */
+    part: text("part").notNull().default(""),
+    title: text("title").notNull(),
+    summary: text("summary").notNull().default(""),
+    hours: real("hours").notNull().default(4),
+    /** prereq: the "zero" module with what the course assumes. */
+    kind: text("kind").$type<"regular" | "prereq">().notNull().default("regular"),
+    sections: text("sections", { mode: "json" }).$type<ProgramSection[]>().notNull(),
+    topicId: integer("topic_id"),
+    /** Book exercises and section summaries found while preparing, for lessons. */
+    guide: text("guide"),
+    preparedAt: integer("prepared_at"),
+    /** How the module was closed: checkpoint passed, passed before learning, or the placement test. */
+    credit: text("credit").$type<"exam" | "early" | "placement" | null>(),
+    passedAt: integer("passed_at"),
+  },
+  (t) => [index("semester_modules_semester").on(t.semesterId, t.idx)],
+);
+
+export type AssessmentKind = "placement" | "checkpoint" | "midterm" | "final" | "homework";
+
+/** The grade book: every graded piece of work. */
+export const semesterAssessments = sqliteTable(
+  "semester_assessments",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    semesterId: integer("semester_id").notNull(),
+    moduleId: integer("module_id"),
+    kind: text("kind").$type<AssessmentKind>().notNull(),
+    /** Percent, 0–100. */
+    score: real("score").notNull(),
+    passed: integer("passed", { mode: "boolean" }).notNull(),
+    /** Per idea: key, title, got, total. */
+    details: text("details", { mode: "json" }).$type<{ key: string; title: string; got: number; total: number }[]>().notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [index("semester_assessments_semester").on(t.semesterId)],
+);
+
+export interface HomeworkCriterion {
+  criterion: string;
+  points: number;
+}
+
+export interface HomeworkReview {
+  scores: { criterion: string; got: number; max: number; comment: string }[];
+  total: number;
+  feedback: string;
+}
+
+/** A weekly task that ties several ideas together, graded against a rubric. */
+export const semesterHomework = sqliteTable(
+  "semester_homework",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    semesterId: integer("semester_id").notNull(),
+    week: integer("week").notNull(),
+    moduleIds: text("module_ids", { mode: "json" }).$type<number[]>().notNull(),
+    title: text("title").notNull(),
+    task: text("task").notNull(),
+    rubric: text("rubric", { mode: "json" }).$type<HomeworkCriterion[]>().notNull(),
+    answer: text("answer"),
+    review: text("review", { mode: "json" }).$type<HomeworkReview | null>(),
+    status: text("status").$type<"open" | "graded">().notNull().default("open"),
+    createdAt: integer("created_at").notNull(),
+    gradedAt: integer("graded_at"),
+  },
+  (t) => [index("semester_homework_semester").on(t.semesterId)],
 );

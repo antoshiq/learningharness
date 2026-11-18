@@ -374,6 +374,7 @@ export function Workbench({ children }: { children: ReactNode }) {
       });
     }
     out.push({ id: "brief", icon: "compass", label: "Быстрый экскурс", hint: "тема, файлы, ссылка или проект", run: () => router.push("/brief") });
+    out.push({ id: "semester", icon: "cap", label: "Семестр", hint: "полный курс по учебнику или теме", run: () => router.push("/semester") });
     out.push({ id: "plan", icon: "calendar", label: "Подготовка к дате", hint: "план до экзамена", run: () => router.push("/plan") });
     out.push({ id: "sandbox", icon: "play", label: "Песочница кода", hint: "Python и JavaScript", run: () => router.push("/sandbox") });
     out.push({ id: "review-code", icon: "target", label: "Разбор моего кода", run: () => router.push("/brief?kind=review") });
@@ -409,7 +410,7 @@ export function Workbench({ children }: { children: ReactNode }) {
   if (bare) return <>{children}</>;
 
   const inSettings = path.startsWith("/settings");
-  const section = path.startsWith("/plan") ? "plan" : path.startsWith("/ask") ? "ask" : path.startsWith("/brief") ? "brief" : path.startsWith("/review") ? "review" : path.startsWith("/mistakes") ? "mistakes" : path.startsWith("/stats") ? "stats" : inSettings ? "settings" : "topics";
+  const section = path.startsWith("/semester") ? "semester" : path.startsWith("/plan") ? "plan" : path.startsWith("/ask") ? "ask" : path.startsWith("/brief") ? "brief" : path.startsWith("/review") ? "review" : path.startsWith("/mistakes") ? "mistakes" : path.startsWith("/stats") ? "stats" : inSettings ? "settings" : "topics";
   const dueTotal = (topics ?? []).reduce((s, t) => s + t.due, 0);
   const activity = (href: string, icon: IconName, label: string, active: boolean, badge = 0) => (
     <Link
@@ -453,6 +454,7 @@ export function Workbench({ children }: { children: ReactNode }) {
       {/* Icons sit straight on the backdrop; the side bar and the editor are rounded blocks with gaps. */}
       <nav className="fixed top-9 bottom-7 left-1.5 z-40 hidden w-12 flex-col gap-2.5 py-1.5 sm:flex" aria-label="Разделы">
         {activity("/", "files", "Темы", section === "topics")}
+        {activity("/semester", "cap", "Семестр", section === "semester")}
         {activity("/plan", "calendar", "Подготовка к дате", section === "plan")}
         {activity("/brief", "compass", "Быстрый экскурс", section === "brief")}
         {activity("/ask", "chat", "Вопрос к проекту", section === "ask")}

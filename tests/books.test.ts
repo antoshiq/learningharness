@@ -112,7 +112,7 @@ describe("storing, reading and searching", () => {
     const text = `# Пределы\n\nПредел последовательности — число, к которому она стремится.\n\n# Производная\n\nПроизводной функции называют предел отношения приращений.\n\n# Интеграл\n\nПервообразная и интеграл.`;
     const { id, bookmarks } = await books.storeBook({ semesterId: null, name: "конспект.md", role: "lectures", data: new TextEncoder().encode(text) });
     expect(bookmarks.length).toBe(3);
-    expect(await books.outlineBook(id, bookmarks)).toBe("bookmarks");
+    expect(await books.outlineBook(id)).toBe("bookmarks");
 
     const outline = books.outlineText([id]);
     expect(outline).toContain("конспект.md");
@@ -130,8 +130,8 @@ describe("storing, reading and searching", () => {
 
   it("falls back to page chunks when a book has no structure", async () => {
     const plain = Array.from({ length: 40 }, (_, i) => `Абзац номер ${i}. ${"текст ".repeat(150)}`).join("\n\n");
-    const { id, bookmarks } = await books.storeBook({ semesterId: null, name: "заметки.txt", role: "extra", data: new TextEncoder().encode(plain) });
-    expect(await books.outlineBook(id, bookmarks)).toBe("pages");
+    const { id } = await books.storeBook({ semesterId: null, name: "заметки.txt", role: "extra", data: new TextEncoder().encode(plain) });
+    expect(await books.outlineBook(id)).toBe("pages");
   });
 
   it("refuses binary files that are not PDFs", async () => {
@@ -156,8 +156,8 @@ describe("PDF", () => {
     // Bookmarks point at the pages where the headings really are.
     for (const b of bookmarks) expect(pages[b.page - 1]).toContain(b.title.split(". ").pop());
 
-    const { id, bookmarks: bm } = await books.storeBook({ semesterId: null, name: "book.pdf", role: "main", data });
-    expect(await books.outlineBook(id, bm)).toBe("bookmarks");
+    const { id } = await books.storeBook({ semesterId: null, name: "book.pdf", role: "main", data });
+    expect(await books.outlineBook(id)).toBe("bookmarks");
     const hit = books.searchBooks([id], "производной")[0];
     // The section runs over more than one page; any of them is a right answer.
     expect(hit.page).toBeGreaterThanOrEqual(bookmarks[6].page);

@@ -55,6 +55,35 @@ export function mockProvider(): LlmProvider {
             ),
           ]);
         }
+        if (req.system.startsWith("Ты составляешь программу семестра")) {
+          // One module per chapter of the outline (sections as its sections), or two modules for a bare topic.
+          const text = req.messages.map((m) => m.content.filter(isText).map((b) => b.text).join("")).join("\n");
+          const modules: { title: string; summary: string; hours: number; sections: { title: string; summary: string; refs: string[] }[] }[] = [];
+          for (const m of text.matchAll(/^( *)s(\d+) (.+?) \(стр\./gm)) {
+            const sec = { title: m[3], summary: "", refs: [`s${m[2]}`] };
+            if (!m[1].length || !modules.length) modules.push({ title: m[3], summary: "(тест) модуль", hours: 4, sections: m[1].length ? [sec] : [] });
+            else modules[modules.length - 1].sections.push(sec);
+          }
+          for (const m of modules) if (!m.sections.length) m.sections.push({ title: m.title, summary: "", refs: [] });
+          if (!modules.length) {
+            modules.push(
+              { title: "Пределы", summary: "(тест)", hours: 6, sections: [{ title: "Предел последовательности", summary: "", refs: [] }, { title: "Предел функции", summary: "", refs: [] }] },
+              { title: "Производная", summary: "(тест)", hours: 6, sections: [{ title: "Определение производной", summary: "", refs: [] }, { title: "Правила дифференцирования", summary: "", refs: [] }] },
+            );
+          }
+          return done([
+            say(
+              JSON.stringify({
+                title: "(тест) Курс",
+                estimate_hours: 12,
+                prereqs: [{ key: "functions", title: "Функции", summary: "Что такое функция" }],
+                parts: [{ title: "Часть 1", modules }],
+                notes: [],
+                recommended: modules.some((m) => m.sections.some((s) => s.refs.length)) ? [] : ["(тест) Учебник"],
+              }),
+            ),
+          ]);
+        }
         if (req.system.startsWith("Ты извлекаешь оглавление")) {
           // Table of contents lines "Title ..... 12" become entries.
           const text = req.messages.map((m) => m.content.filter(isText).map((b) => b.text).join("")).join("\n");

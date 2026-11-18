@@ -7,6 +7,11 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["better-sqlite3", "@anthropic-ai/claude-agent-sdk"],
   allowedDevOrigins,
   devIndicators: false,
+  experimental: {
+    // src/proxy.ts makes Next buffer request bodies, by default only 10 MB.
+    // Textbooks are uploaded whole (up to 100 MB), PDF materials as base64.
+    proxyClientMaxBodySize: "150mb",
+  },
   turbopack: {
     rules: {
       "*.css": {

@@ -381,6 +381,7 @@ export async function storeBook(input: BookInput): Promise<{ id: number; bookmar
         pages: pages.length,
         chars: pages.reduce((n, p) => n + p.length, 0),
         status: "outlining",
+        bookmarks,
         createdAt: Date.now(),
       })
       .returning({ id: schema.books.id })
@@ -406,9 +407,10 @@ export function bookPagesText(bookId: number): string[] {
 }
 
 /** Second step: find the outline (possibly with the model) and save the sections. */
-export async function outlineBook(bookId: number, bookmarks: OutlineEntry[] = [], onStep?: (text: string) => void): Promise<OutlineSource> {
+export async function outlineBook(bookId: number, onStep?: (text: string) => void): Promise<OutlineSource> {
   const db = getDb();
   const pages = bookPagesText(bookId);
+  const bookmarks = db.select({ b: schema.books.bookmarks }).from(schema.books).where(eq(schema.books.id, bookId)).get()?.b ?? [];
   let entries: OutlineEntry[] = [];
   let source: OutlineSource = "pages";
   const tries: [OutlineSource, string, () => Promise<OutlineEntry[]> | OutlineEntry[]][] = [
@@ -441,7 +443,7 @@ export async function outlineBook(bookId: number, bookmarks: OutlineEntry[] = []
         .values(sections.map((s, idx) => ({ bookId, idx, level: s.level, title: s.title, pageFrom: s.page, pageTo: s.pageTo })))
         .run();
     }
-    tx.update(schema.books).set({ status: "ready", outlineSource: source, error: null }).where(eq(schema.books.id, bookId)).run();
+    tx.update(schema.books).set({ status: "ready", outlineSource: source, error: null, bookmarks: null }).where(eq(schema.books.id, bookId)).run();
   });
   return source;
 }
@@ -542,6 +544,10 @@ export function searchBooks(bookIds: number[], query: string, limit = 12): BookH
   return rows.map((r) => ({ ...r, snippet: r.snippet.replace(/\s+/g, " ").trim() }));
 }
 
+/** Front and back matter: not taught and not offered to the program. */
+export const SERVICE_TITLE = /предислови|от автор|список литератур|^литература|библиограф|указатель|^оглавлени|^содержани|preface|bibliograph|^index|^contents|об авторе/i;
+export const isServiceTitle = (title: string) => SERVICE_TITLE.test(title.replace(/^[\d.§\s]+/, "").trim());
+
 /** Compact outline of books for prompts: one line per section with its id and pages. */
 export function outlineText(bookIds: number[], maxLevel = 2): string {
   if (!bookIds.length) return "";
@@ -556,7 +562,7 @@ export function outlineText(bookIds: number[], maxLevel = 2): string {
       .where(and(eq(schema.bookSections.bookId, b.id), sql`${schema.bookSections.level} <= ${maxLevel}`))
       .orderBy(asc(schema.bookSections.idx))
       .all();
-    for (const s of secs) out.push(`${"  ".repeat(s.level - 1)}s${s.id} ${s.title} (стр. ${s.pageFrom}–${s.pageTo})`);
+    for (const s of secs.filter((x) => !isServiceTitle(x.title))) out.push(`${"  ".repeat(s.level - 1)}s${s.id} ${s.title} (стр. ${s.pageFrom}–${s.pageTo})`);
   }
   return out.join("\n");
 }
