@@ -230,3 +230,33 @@ describe("a passed placement test", () => {
     expect(v.active!.grade).toBeNull();
   });
 });
+
+describe("course map", () => {
+  it("colours every idea by its level and lists sections of unprepared modules", async () => {
+    const id = await startedSemester();
+    const v = sem.getSemesterView(id);
+    const topicId = v.modules[1].topicId!;
+    const db = dbmod.getDb();
+    const nodes = db.select().from(dbmod.schema.nodes).all().filter((n) => n.topicId === topicId);
+    const k = (await import("@/server/mastery")).initialKnownCard();
+    const { eq } = await import("drizzle-orm");
+    // studied; checked; checked + explained; checked + explained + lasting.
+    db.update(dbmod.schema.nodes).set({ status: "learning" }).where(eq(dbmod.schema.nodes.id, nodes[0].id)).run();
+    for (const n of nodes.slice(1)) db.update(dbmod.schema.nodes).set({ status: "mastered", card: k.card, dueAt: k.dueAt }).where(eq(dbmod.schema.nodes.id, n.id)).run();
+    db.update(dbmod.schema.nodes).set({ card: { ...k.card, scheduled_days: 30, stability: 30 } }).where(eq(dbmod.schema.nodes.id, nodes[3].id)).run();
+    const round = { text: "x", review: { score: 90, verdict: "correct" as const, good: [], gaps: [], errors: [], followup: "", model: "" }, at: Date.now() };
+    for (const n of nodes.slice(2)) db.insert(dbmod.schema.explanations).values({ topicId, nodeKey: n.key, concept: n.title, rounds: [round], createdAt: Date.now(), updatedAt: Date.now() }).run();
+    db.insert(dbmod.schema.attempts).values({ sessionId: 0, topicId, nodeKey: nodes[0].key, toolUseId: "t", purpose: "check", kind: "choice", question: { kind: "choice", purpose: "check", prompt: "?" }, outcome: "wrong", createdAt: Date.now() }).run();
+
+    const map = mods.courseMap(id);
+    const m1 = map.modules.find((m) => m.id === v.modules[1].id)!;
+    expect(m1.ideas.map((i) => i.level)).toEqual([1, 2, 3, 4]);
+    expect(m1.ideas[0].mistakes).toBe(1);
+    // Totals count the whole course: one idea each is checked, explained and known for good.
+    expect(map.totals.slice(2)).toEqual([1, 1, 1]);
+    const later = map.modules.find((m) => m.id === v.modules[2].id)!;
+    expect(later.ideas).toEqual([]);
+    expect(later.sections.length).toBeGreaterThan(0);
+    expect(later.status).toBe("locked");
+  });
+});

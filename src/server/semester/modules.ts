@@ -469,3 +469,78 @@ export function topicSemester(moduleId: number | null) {
     status: moduleStatuses(sem.id).get(m.id) ?? "locked",
   };
 }
+
+// ---------------------------------------------------------------------------
+// Course map
+// ---------------------------------------------------------------------------
+
+/** 0 new, 1 studied, 2 checked, 3 explained, 4 known for good (explained and lasting). */
+export type IdeaLevel = 0 | 1 | 2 | 3 | 4;
+
+export interface MapIdea {
+  key: string;
+  title: string;
+  level: IdeaLevel;
+  /** Due for review now. */
+  due: boolean;
+  /** Wrong or partial answers on it, lessons and practice together. */
+  mistakes: number;
+}
+
+export interface MapModule {
+  id: number;
+  idx: number;
+  kind: "regular" | "prereq";
+  part: string;
+  title: string;
+  status: ModuleStatus;
+  topicId: number | null;
+  ideas: MapIdea[];
+  /** Before preparation the ideas are not known yet: the sections stand in. */
+  sections: string[];
+}
+
+export function courseMap(semesterId: number, now = Date.now()): { modules: MapModule[]; totals: number[] } {
+  const db = getDb();
+  const statuses = moduleStatuses(semesterId);
+  const totals = [0, 0, 0, 0, 0];
+  const modules = semesterModules(semesterId).map((m): MapModule => {
+    const ideas: MapIdea[] = [];
+    if (m.topicId) {
+      const nodes = db.select().from(schema.nodes).where(eq(schema.nodes.topicId, m.topicId)).orderBy(asc(schema.nodes.orderIdx)).all();
+      const explained = new Set(
+        db
+          .select()
+          .from(schema.explanations)
+          .where(eq(schema.explanations.topicId, m.topicId))
+          .all()
+          .filter((e) => e.nodeKey && e.rounds.some((r) => r.review.verdict === "correct" || r.review.score >= 80))
+          .map((e) => e.nodeKey!),
+      );
+      const mistakes = new Map<string, number>();
+      for (const a of db.select({ key: schema.attempts.nodeKey, outcome: schema.attempts.outcome }).from(schema.attempts).where(eq(schema.attempts.topicId, m.topicId)).all()) {
+        if (a.key && (a.outcome === "wrong" || a.outcome === "partial")) mistakes.set(a.key, (mistakes.get(a.key) ?? 0) + 1);
+      }
+      for (const n of nodes) {
+        const checked = n.status === "mastered";
+        const lasting = checked && !!n.card && (n.card.scheduled_days >= LASTING_DAYS || n.card.stability >= LASTING_DAYS);
+        const exp = explained.has(n.key);
+        const level: IdeaLevel = checked ? (exp ? (lasting ? 4 : 3) : 2) : n.status !== "new" || exp ? 1 : 0;
+        totals[level]++;
+        ideas.push({ key: n.key, title: n.title, level, due: n.status !== "new" && n.dueAt !== null && n.dueAt <= now, mistakes: mistakes.get(n.key) ?? 0 });
+      }
+    }
+    return {
+      id: m.id,
+      idx: m.idx,
+      kind: m.kind,
+      part: m.part,
+      title: m.title,
+      status: statuses.get(m.id) ?? "locked",
+      topicId: m.topicId,
+      ideas,
+      sections: m.sections.map((s) => s.title),
+    };
+  });
+  return { modules, totals };
+}

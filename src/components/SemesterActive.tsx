@@ -423,6 +423,12 @@ export function SemesterActive({ s, onChange }: { s: SemesterView; onChange: () 
         «Знаю надёжно» — идея проверена, объяснена своими словами и держится в памяти три недели и дольше.
       </p>
 
+      <div className="-mt-2 flex flex-wrap gap-2">
+        <LinkButton small href={`/semester/${s.id}/map`}>
+          <Icon name="target" size={14} /> Карта курса
+        </LinkButton>
+      </div>
+
       <Now s={s} />
       {a.prepareError && <Notice tone="bad">{a.prepareError}</Notice>}
       <Today s={s} />
