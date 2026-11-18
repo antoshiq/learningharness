@@ -10,7 +10,10 @@ import { startOfDay } from "../stats";
 import { gradeOf, GRADE_WEIGHTS } from "@/lib/semester";
 import type { AssessmentKind } from "../db/schema";
 import { assessments, examAvailability, ideaLevels, moduleStatuses, nextTry, prepareAhead, prepErrors, setupModules, type ExamAvailability, type IdeaLevels, type ModuleStatus } from "./modules";
-import { buildProgram, type ProgramModule } from "./program";
+import { buildProgram, mapBookToProgram, type ProgramModule } from "./program";
+import { calendar } from "./calendar";
+import { listHomework } from "./homework";
+import { reviewQueue } from "../practice";
 
 const jobKey = (id: number) => `semester:${id}`;
 
@@ -119,8 +122,9 @@ function setStep(id: number, step: string | null) {
   getDb().update(schema.semesters).set({ step }).where(eq(schema.semesters.id, id)).run();
 }
 
-/** Outline books that are not outlined yet. Errors stay on the book; the rest go on. */
-async function outlinePending(semesterId: number) {
+/** Outline books that are not outlined yet. Errors stay on the book; the rest go on. Returns the books read. */
+async function outlinePending(semesterId: number): Promise<number[]> {
+  const done: number[] = [];
   const db = getDb();
   const pending = db
     .select()
@@ -132,6 +136,7 @@ async function outlinePending(semesterId: number) {
     setStep(semesterId, `«${b.name}»: читаю структуру`);
     try {
       await outlineBook(b.id, (label) => setStep(semesterId, `«${b.name}»: ${label.toLowerCase()}`));
+      done.push(b.id);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       // A spending cap or a missing model setup stops the whole preparation.
@@ -139,6 +144,7 @@ async function outlinePending(semesterId: number) {
       db.update(schema.books).set({ status: "error", error: msg }).where(eq(schema.books.id, b.id)).run();
     }
   }
+  return done;
 }
 
 /** Save a program as the semester's modules (replacing the old ones). */
@@ -164,7 +170,14 @@ export function startPreparation(semesterId: number, rebuild = false): boolean {
     // be added to the program by hand (or the program rebuilt); in a running semester lessons find them by search.
     return startJob(jobKey(semesterId), async () => {
       try {
-        await outlinePending(semesterId);
+        const read = await outlinePending(semesterId);
+        // In a running semester new books are attached to the program's sections, so lessons read them.
+        if (sem.status !== "draft") {
+          for (const bookId of read) {
+            setStep(semesterId, "Раскладываю новую книгу по программе");
+            await mapBookToProgram(semesterId, bookId);
+          }
+        }
         setStep(semesterId, null);
       } catch (e) {
         getDb().update(schema.semesters).set({ step: null, error: e instanceof Error ? e.message : String(e) }).where(eq(schema.semesters.id, semesterId)).run();
@@ -416,6 +429,26 @@ export interface ActiveInfo {
   grade: { pct: number; mark: number; label: string; parts: { kind: AssessmentKind; pct: number; weight: number }[] } | null;
   preparing: boolean;
   prepareError: string | null;
+  calendar: {
+    currentWeek: number;
+    weeks: { week: number; start: number; modules: string[]; midterm: boolean; final: boolean }[];
+    pace: "ahead" | "ok" | "behind" | "late";
+    expectedPassed: number;
+    passed: number;
+    total: number;
+    neededPerWeek: number;
+    daysLeft: number;
+  };
+  homework: { id: number; week: number; title: string; status: "open" | "graded"; score: number | null }[];
+  /** What to do today, in order. */
+  today: TodayTask[];
+}
+
+export interface TodayTask {
+  kind: "placement" | "learn" | "checkpoint" | "review" | "homework" | "new-homework" | "midterm" | "final";
+  title: string;
+  /** Where it is done; new-homework is an action on the semester page instead. */
+  href: string | null;
 }
 
 export interface SemesterView {
@@ -555,6 +588,31 @@ function activeInfo(id: number, modules: ModuleView[]): ActiveInfo {
   }
   // The zero module is what the course assumes, not the course: it is not graded.
   const zero = new Set(modules.filter((m) => m.kind === "prereq").map((m) => m.id));
+  const rows = getDb().select().from(schema.semesterModules).where(eq(schema.semesterModules.semesterId, id)).orderBy(asc(schema.semesterModules.idx)).all();
+  const cal = calendar(rows, sem);
+  const homework = listHomework(id);
+  const today: TodayTask[] = [];
+  if (sem.status === "active") {
+    const midterm = examAvailability(id, "midterm");
+    const final = examAvailability(id, "final");
+    const open = modules.find((m) => m.status === "open");
+    if (final.available && !final.passed) today.push({ kind: "final", title: "Итоговый экзамен", href: `/semester/${id}/exam?kind=final` });
+    if (midterm.available && !midterm.passed) today.push({ kind: "midterm", title: "Промежуточный экзамен", href: `/semester/${id}/exam?kind=midterm` });
+    if (open?.topicId) {
+      if (open.kind === "prereq" && !open.checkpoint?.tries) today.push({ kind: "placement", title: "Входной тест", href: `/semester/${id}/exam?kind=placement&module=${open.id}` });
+      else if (open.ideas && open.ideas.total > 0 && open.ideas.checked === open.ideas.total && !open.checkpoint?.nextTryAt)
+        today.push({ kind: "checkpoint", title: `Контрольная: ${open.title}`, href: `/semester/${id}/exam?kind=checkpoint&module=${open.id}` });
+      else today.push({ kind: "learn", title: `${open.openSessionId ? "Продолжить урок" : "Урок"}: ${open.title}`, href: open.openSessionId ? `/session/${open.openSessionId}` : `/topics/${open.topicId}?start=lesson` });
+    }
+    const due = reviewQueue().items.length;
+    if (due) today.push({ kind: "review", title: `Повторение: ${due}`, href: "/review" });
+    const week = Math.max(1, Math.min(sem.weeks, cal.currentWeek));
+    const hw = homework.find((h) => h.week === week);
+    const studied = modules.some((m) => m.kind === "regular" && ((m.ideas?.studied ?? 0) > 0 || m.credit));
+    if (hw && hw.status === "open") today.push({ kind: "homework", title: `Домашнее задание недели ${week}`, href: `/semester/${id}/homework/${hw.id}` });
+    else if (!hw && studied && cal.currentWeek >= 1) today.push({ kind: "new-homework", title: `Домашнее задание недели ${week}`, href: null });
+  }
+  const names = new Map(rows.map((m) => [m.id, m.kind === "prereq" ? "Нулевой модуль" : m.title]));
   const grade = computeGrade(all.filter((a) => !(a.moduleId && zero.has(a.moduleId))).map((a) => ({ kind: a.kind, moduleId: a.moduleId, score: a.score })));
   return {
     threshold: LEVELS[sem.level].threshold,
@@ -566,6 +624,18 @@ function activeInfo(id: number, modules: ModuleView[]): ActiveInfo {
     grade: grade ? { pct: grade.pct, mark: grade.mark, label: grade.label, parts: grade.parts } : null,
     preparing: isJobRunning(`semester-modules:${id}`),
     prepareError: prepErrors.get(id) ?? null,
+    calendar: {
+      currentWeek: cal.currentWeek,
+      weeks: cal.weeks.map((w) => ({ week: w.week, start: w.start, modules: w.moduleIds.map((m) => names.get(m) ?? ""), midterm: w.midterm, final: w.final })),
+      pace: cal.pace,
+      expectedPassed: cal.expectedPassed,
+      passed: cal.passed,
+      total: rows.length,
+      neededPerWeek: cal.neededPerWeek,
+      daysLeft: cal.daysLeft,
+    },
+    homework: homework.map((h) => ({ id: h.id, week: h.week, title: h.title, status: h.status, score: h.review?.total ?? null })),
+    today,
   };
 }
 
@@ -603,4 +673,28 @@ export function approveProgram(id: number) {
   }
   db.update(schema.semesters).set({ status: "active", startedAt: Date.now() }).where(eq(schema.semesters.id, id)).run();
   setupModules(id);
+}
+
+export interface SemesterBrief {
+  id: number;
+  title: string;
+  week: number;
+  weeks: number;
+  pace: ActiveInfo["calendar"]["pace"];
+  progress: number;
+  today: TodayTask[];
+}
+
+/** Running semesters with today's tasks, for the home page. */
+export function activeSemesters(): SemesterBrief[] {
+  return getDb()
+    .select({ id: schema.semesters.id })
+    .from(schema.semesters)
+    .where(eq(schema.semesters.status, "active"))
+    .all()
+    .map((r) => {
+      const v = getSemesterView(r.id);
+      const a = v.active!;
+      return { id: v.id, title: v.title, week: a.calendar.currentWeek, weeks: v.weeks, pace: a.calendar.pace, progress: a.progress, today: a.today };
+    });
 }

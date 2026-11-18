@@ -95,7 +95,8 @@ function createModuleTopic(sem: SemesterRow, m: ModuleRow, ideas: Idea[], guide:
       .insert(schema.topics)
       .values({
         title: m.kind === "prereq" ? `${sem.title}: что нужно знать заранее` : m.title,
-        goal: m.kind === "prereq" ? "Нулевой модуль семестра: то, на что опирается курс." : `Модуль ${m.idx} семестра «${sem.title}». ${m.summary}`.trim(),
+        // The topic page says which semester it belongs to; the goal is what the module is about.
+        goal: m.kind === "prereq" ? "То, на что опирается курс." : m.summary,
         kind: "topic",
         semesterModuleId: m.id,
         createdAt: now,

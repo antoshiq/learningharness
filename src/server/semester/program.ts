@@ -234,3 +234,42 @@ export async function buildProgram(semesterId: number): Promise<Program> {
   if (!program.title) program.title = sem.request || books[0]?.name.replace(/\.[^.]+$/, "") || "Семестр";
   return program;
 }
+
+export const MAP_SYSTEM = `Ты раскладываешь новую книгу по готовой программе семестра. Для каждого раздела программы (id вида "m12.3") перечисли разделы книги (id вида "s45"), которые подходят ему по содержанию: тот же материал, задачи к нему, другой взгляд на ту же тему. Раздел книги может подойти нескольким разделам программы; неподходящие пропусти.
+Ответ — только JSON: {"m12.3": ["s45", "s46"], ...}`;
+
+/**
+ * A book added to a running semester: its sections are attached to the
+ * program's sections, so module lessons read it too. The program itself does
+ * not change. Returns how many program sections got new material.
+ */
+export async function mapBookToProgram(semesterId: number, bookId: number): Promise<number> {
+  const db = getDb();
+  const modules = db.select().from(schema.semesterModules).where(and(eq(schema.semesterModules.semesterId, semesterId), eq(schema.semesterModules.kind, "regular"))).orderBy(asc(schema.semesterModules.idx)).all();
+  const secIds = new Set(db.select({ id: schema.bookSections.id }).from(schema.bookSections).where(eq(schema.bookSections.bookId, bookId)).all().map((r) => r.id));
+  if (!modules.length || !secIds.size) return 0;
+  const program = modules
+    .map((m) => `Модуль «${m.title}»:\n${m.sections.map((s, i) => `  m${m.id}.${i + 1} ${s.title}${s.summary ? ` — ${s.summary}` : ""}`).join("\n")}`)
+    .join("\n");
+  const r = await chatAs("cheap", "semester-map-book", null, {
+    system: MAP_SYSTEM,
+    messages: [{ role: "user", content: [{ type: "text", text: `Программа:\n${program}\n\nНовая книга:\n${outlineText([bookId], 2)}` }] }],
+    maxTokens: 8000,
+  });
+  const raw = jsonObject(r.content.filter(isText).map((b) => b.text).join(""));
+  if (!raw || typeof raw !== "object") return 0;
+  let changed = 0;
+  for (const m of modules) {
+    let touched = false;
+    const sections = m.sections.map((s, i) => {
+      const add = ((raw as Record<string, unknown>)[`m${m.id}.${i + 1}`] ?? []) as unknown[];
+      const refs = (Array.isArray(add) ? add : []).map((x) => Number(String(x).replace(/^s/i, ""))).filter((n) => secIds.has(n) && !s.refs.includes(n));
+      if (!refs.length) return s;
+      touched = true;
+      changed++;
+      return { ...s, refs: [...s.refs, ...refs] };
+    });
+    if (touched) db.update(schema.semesterModules).set({ sections }).where(eq(schema.semesterModules.id, m.id)).run();
+  }
+  return changed;
+}

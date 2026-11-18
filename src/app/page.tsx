@@ -12,6 +12,7 @@ import { NEW_TOPIC_EVENT, notifyChanged, useWorkbench } from "@/components/workb
 import { api, daysWord, formatAgo, formatCost, formatTokens, plural } from "@/lib/api";
 import type { Stats } from "@/lib/types";
 import type { PlanView } from "@/server/studyplan";
+import type { SemesterBrief } from "@/server/semester";
 import type { TopicCard } from "@/server/sessions";
 
 interface Scan {
@@ -168,6 +169,7 @@ export default function Home() {
   const [start, setStart] = useState<{ topicId: number; kind: "lesson" | "review" } | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [plans, setPlans] = useState<PlanView[]>([]);
+  const [semesters, setSemesters] = useState<SemesterBrief[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -186,6 +188,9 @@ export default function Home() {
       .catch(() => {});
     api<{ plans: PlanView[] }>("/api/plans")
       .then((r) => setPlans(r.plans.filter((p) => p.daysLeft >= 0)))
+      .catch(() => {});
+    api<{ semesters: SemesterBrief[] }>("/api/semesters/active")
+      .then((r) => setSemesters(r.semesters))
       .catch(() => {});
   }, [load]);
 
@@ -281,6 +286,33 @@ export default function Home() {
                 ))}
               </dl>
 
+              {semesters.map((s) => (
+                <section key={`sem-${s.id}`} className="enter overflow-hidden rounded-md border border-border bg-surface">
+                  <PanelTitle
+                    right={
+                      <Link href={`/semester/${s.id}`} className="text-xs text-accent hover:underline">
+                        {s.week >= 1 && s.week <= s.weeks ? `неделя ${s.week} из ${s.weeks}` : "семестр"} · освоено {s.progress}%{s.pace === "behind" ? " · отстаёшь" : ""}
+                      </Link>
+                    }
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Icon name="cap" className="text-accent" /> {s.title}: сегодня
+                    </span>
+                  </PanelTitle>
+                  <ul className="divide-y divide-border">
+                    {s.today.slice(0, 4).map((t) => (
+                      <li key={t.kind + t.title}>
+                        <Link href={t.href ?? `/semester/${s.id}`} className="group flex items-center gap-2.5 px-3 py-1.5 text-sm hover:bg-surface-2/60">
+                          <Icon name={t.kind === "review" ? "clock" : t.kind === "learn" ? "play" : t.kind.includes("homework") ? "note" : "check"} className="text-muted" />
+                          <span className="min-w-0 flex-1 truncate group-hover:text-accent">{t.title}</span>
+                        </Link>
+                      </li>
+                    ))}
+                    {!s.today.length && <li className="px-3 py-1.5 text-sm text-muted">На сегодня всё сделано.</li>}
+                  </ul>
+                </section>
+              ))}
+
               {plans.map((p) => (
                 <section key={p.id} className="enter overflow-hidden rounded-md border border-border bg-surface">
                   <PanelTitle
@@ -354,7 +386,7 @@ export default function Home() {
                               <span className="truncate text-bright group-hover:text-accent">{t.title}</span>
                               {t.due > 0 && <Count n={t.due} active />}
                             </span>
-                            <span className="line-clamp-1 block text-xs text-muted">{t.kind === "repo" ? t.repoPath : t.goal || "Без описания цели"}</span>
+                            <span className="block truncate text-xs text-muted">{t.kind === "repo" ? t.repoPath : t.goal || "Без описания цели"}</span>
                           </span>
                         </Link>
                         <div className="shrink-0 md:w-44">

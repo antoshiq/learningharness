@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api, formatDate } from "@/lib/api";
 import { ASSESSMENT_LABEL, MASTERY_STEPS } from "@/lib/semester";
-import type { ModuleView, SemesterView } from "@/server/semester";
+import type { ModuleView, SemesterView, TodayTask } from "@/server/semester";
 import { Badge, Button, Card, Cells, cx, Dots, Icon, LinkButton, Notice, PanelTitle } from "./ui";
 
 const when = (ms: number) => new Date(ms).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
@@ -185,6 +186,132 @@ function Now({ s }: { s: SemesterView }) {
   return text ? <Notice tone="accent">{text}</Notice> : null;
 }
 
+const PACE = {
+  ahead: ["ok", "опережаешь"],
+  ok: ["ok", "в графике"],
+  behind: ["warn", "отстаёшь"],
+  late: ["bad", "срок вышел"],
+} as const;
+
+const TASK_ICON: Record<TodayTask["kind"], "play" | "check" | "clock" | "note"> = {
+  placement: "check",
+  learn: "play",
+  checkpoint: "check",
+  review: "clock",
+  homework: "note",
+  "new-homework": "note",
+  midterm: "check",
+  final: "check",
+};
+
+/** Today's list: what the calendar and the gates say to do now. */
+function Today({ s }: { s: SemesterView }) {
+  const router = useRouter();
+  const a = s.active!;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!a.today.length) return null;
+  const newHomework = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { id } = await api<{ id: number }>(`/api/semesters/${s.id}/homework`, { body: {} });
+      router.push(`/semester/${s.id}/homework/${id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="overflow-hidden rounded-md border border-border bg-surface">
+      <PanelTitle>Сегодня</PanelTitle>
+      <ul className="divide-y divide-border">
+        {a.today.map((t, i) => (
+          <li key={t.kind + t.title}>
+            {t.href ? (
+              <Link href={t.href} className="group flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-surface-2/60">
+                <Icon name={TASK_ICON[t.kind]} className={i === 0 ? "text-accent" : "text-muted"} />
+                <span className={cx("min-w-0 flex-1 truncate group-hover:text-accent", i === 0 ? "text-bright" : "text-text")}>{t.title}</span>
+                <Icon name="chevron" size={14} className="text-muted" />
+              </Link>
+            ) : (
+              <button onClick={newHomework} disabled={busy} className="group flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-surface-2/60">
+                <Icon name={TASK_ICON[t.kind]} className="text-muted" />
+                <span className="min-w-0 flex-1 truncate group-hover:text-accent">{busy ? "Составляю задание… (около минуты)" : `${t.title}: получить`}</span>
+                {busy ? <Dots /> : <Icon name="chevron" size={14} className="text-muted" />}
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {error && (
+        <div className="border-t border-border p-2">
+          <Notice tone="bad">{error}</Notice>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CalendarView({ s }: { s: SemesterView }) {
+  const c = s.active!.calendar;
+  const [all, setAll] = useState(false);
+  const [tone, label] = PACE[c.pace];
+  const fmt = (ms: number) => new Date(ms).toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+  const shown = all ? c.weeks : c.weeks.filter((w) => Math.abs(w.week - Math.max(1, c.currentWeek)) <= 2);
+  const title = c.currentWeek === 0 ? "Календарь: семестр ещё не начался" : c.currentWeek > s.weeks ? "Календарь: срок вышел" : `Календарь: неделя ${c.currentWeek} из ${s.weeks}`;
+  return (
+    <section className="overflow-hidden rounded-md border border-border bg-surface">
+      <PanelTitle right={<Badge tone={tone}>{label}</Badge>}>{title}</PanelTitle>
+      <p className="px-3 py-2 text-[13px] text-muted">
+        По плану к сегодняшнему дню сдано модулей: {c.expectedPassed}, у тебя — {c.passed} из {c.total}. Осталось {c.daysLeft} дн.
+        {c.neededPerWeek > s.hoursPerWeek ? ` Чтобы успеть, нужно около ${c.neededPerWeek} ч в неделю вместо ${s.hoursPerWeek}.` : ""}
+      </p>
+      <ol className="divide-y divide-border border-t border-border">
+        {shown.map((w) => (
+          <li key={w.week} className={cx("flex flex-wrap items-baseline gap-x-3 gap-y-0.5 px-3 py-1.5 text-sm", w.week === c.currentWeek && "bg-accent-soft/50")}>
+            <span className={cx("w-24 shrink-0 tabular-nums", w.week === c.currentWeek ? "text-accent" : "text-muted")}>
+              {w.week} · {fmt(w.start)}
+            </span>
+            <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+              {w.modules.length ? <span>{w.modules.join(", ")}</span> : !w.final && <span className="text-muted">повторение и задачи</span>}
+              {w.midterm && <Badge tone="accent">промежуточный экзамен</Badge>}
+              {w.final && <Badge tone="accent">итоговый экзамен</Badge>}
+            </span>
+          </li>
+        ))}
+      </ol>
+      {c.weeks.length > shown.length && (
+        <button onClick={() => setAll(true)} className="w-full border-t border-border px-3 py-1.5 text-left text-[13px] text-accent hover:bg-surface-2/60">
+          Показать все {c.weeks.length} недель
+        </button>
+      )}
+    </section>
+  );
+}
+
+function Homework({ s }: { s: SemesterView }) {
+  const list = s.active!.homework;
+  if (!list.length) return null;
+  return (
+    <section className="overflow-hidden rounded-md border border-border bg-surface">
+      <PanelTitle>Домашние задания</PanelTitle>
+      <ul className="divide-y divide-border">
+        {list.map((h) => (
+          <li key={h.id}>
+            <Link href={`/semester/${s.id}/homework/${h.id}`} className="group flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-surface-2/60">
+              <Icon name="note" className={h.status === "graded" ? "text-ok" : "text-accent"} />
+              <span className="w-16 shrink-0 text-xs text-muted">неделя {h.week}</span>
+              <span className="min-w-0 flex-1 truncate group-hover:text-accent">{h.title}</span>
+              {h.score !== null ? <span className={cx("tabular-nums", h.score >= 55 ? "text-ok" : "text-bad")}>{h.score}%</span> : <Badge tone="warn">не сдано</Badge>}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 /** The running semester: progress, the next step, modules with their gates, exams and the grade book. */
 export function SemesterActive({ s, onChange }: { s: SemesterView; onChange: () => void }) {
   const a = s.active!;
@@ -216,6 +343,8 @@ export function SemesterActive({ s, onChange }: { s: SemesterView; onChange: () 
 
       <Now s={s} />
       {a.prepareError && <Notice tone="bad">{a.prepareError}</Notice>}
+      <Today s={s} />
+      {s.status === "active" && <CalendarView s={s} />}
 
       <section className="overflow-hidden rounded-md border border-border bg-surface">
         <PanelTitle right={a.preparing ? <span className="flex items-center gap-1.5 text-xs text-muted"><Dots /> готовлю модули</span> : undefined}>Модули</PanelTitle>
@@ -232,6 +361,8 @@ export function SemesterActive({ s, onChange }: { s: SemesterView; onChange: () 
           </div>
         ))}
       </section>
+
+      <Homework s={s} />
 
       <section className="overflow-hidden rounded-md border border-border bg-surface">
         <PanelTitle>Экзамены</PanelTitle>

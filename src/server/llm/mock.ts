@@ -55,6 +55,19 @@ export function mockProvider(): LlmProvider {
             ),
           ]);
         }
+        if (req.system.startsWith("Ты составляешь домашнее задание")) {
+          return done([say(JSON.stringify({ title: "(тест) Домашнее задание", task: "Докажите, что $a + b = b + a$.", rubric: [{ criterion: "Верная идея", points: 6 }, { criterion: "Аккуратное оформление", points: 4 }] }))]);
+        }
+        if (req.system.startsWith("Ты проверяешь домашнее задание")) {
+          return done([say(JSON.stringify({ scores: [{ criterion: "Верная идея", got: 6, comment: "(тест) верно" }, { criterion: "Аккуратное оформление", got: 2, comment: "(тест) небрежно" }], feedback: "(тест) Хорошо." }))]);
+        }
+        if (req.system.startsWith("Ты раскладываешь новую книгу")) {
+          // Every book section goes to the first program section.
+          const text = req.messages.map((m) => m.content.filter(isText).map((b) => b.text).join("")).join("\n");
+          const first = /m\d+\.\d+/.exec(text)?.[0];
+          const secs = [...text.matchAll(/^\s*(s\d+) /gm)].map((m) => m[1]);
+          return done([say(JSON.stringify(first ? { [first]: secs } : {}))]);
+        }
         if (req.system.startsWith("Ты готовишь модуль семестра")) {
           // Two ideas per section: "Раздел N: title" lines of the request.
           const text = req.messages.map((m) => m.content.filter(isText).map((b) => b.text).join("")).join("\n");
