@@ -9,7 +9,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
-import { DATA_DIR } from "./paths";
+import { DATA_DIR, ROOT } from "./paths";
 
 type Worker = import("tesseract.js").Worker;
 
@@ -141,7 +141,9 @@ function langDir(): string {
     const target = path.join(dir, `${code}.traineddata.gz`);
     if (fs.existsSync(target)) continue;
     fs.mkdirSync(dir, { recursive: true });
-    const src = path.join(path.dirname(require.resolve(`@tesseract.js-data/${code}/package.json`)), "4.0.0_best_int", `${code}.traineddata.gz`);
+    // From the project's node_modules: the bundler rewrites require.resolve paths on the server.
+    const src = path.join(ROOT, "node_modules", "@tesseract.js-data", code, "4.0.0_best_int", `${code}.traineddata.gz`);
+    if (!fs.existsSync(src)) throw new Error(`Нет данных распознавания (${code}). Переустанови зависимости: install.cmd.`);
     fs.copyFileSync(src, target);
   }
   return dir;

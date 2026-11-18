@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { BookFiles, uploadBook, type BookFile } from "@/components/BookFiles";
@@ -52,6 +53,11 @@ function BookRow({ b, semesterId, editable, onChange }: { b: BookView; semesterI
           <span className="text-xs text-muted" title={SOURCE[b.outlineSource]}>
             {b.sections} {plural(b.sections, "раздел", "раздела", "разделов")} · {SOURCE[b.outlineSource]}
           </span>
+        )}
+        {b.status === "ready" && (
+          <Link href={`/book/${b.id}`} className="text-xs text-accent hover:underline">
+            Открыть
+          </Link>
         )}
         {editable ? (
           <select

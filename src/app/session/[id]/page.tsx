@@ -2,7 +2,9 @@
 
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { BookViewer } from "@/components/BookViewer";
 import { Markdown } from "@/components/Markdown";
+import { BOOK_HREF, linkPages, type LinkBook } from "@/lib/book-links";
 import { PlanGraph } from "@/components/PlanGraph";
 import { QuestionCard } from "@/components/QuestionCard";
 import { Button, Count, cx, Dots, Icon, inputClass, LinkButton, Loading, Notice, Sheet, StatusItem, TopNav } from "@/components/ui";
@@ -13,18 +15,44 @@ import type { SessionView } from "@/server/sessions";
 
 const KIND = { lesson: "Урок", practice: "Практика", review: "Повторение" } as const;
 
+/** The tutor's text; with books, "стр. 142" opens the book at that page. */
+function Prose({ text, books, onBook, className }: { text: string; books: LinkBook[]; onBook: (book: number, page: number) => void; className: string }) {
+  if (!books.length) return <Markdown text={text} className={className} />;
+  return (
+    <Markdown
+      text={linkPages(text, books)}
+      className={className}
+      components={{
+        a: ({ href, children }) => {
+          const m = BOOK_HREF.exec(href ?? "");
+          if (!m) return <a href={href} target="_blank" rel="noreferrer">{children}</a>;
+          return (
+            <button type="button" onClick={() => onBook(Number(m[1]), Number(m[2]))} className="text-accent underline decoration-dotted underline-offset-2 hover:decoration-solid" title="Открыть страницу книги">
+              {children}
+            </button>
+          );
+        },
+      }}
+    />
+  );
+}
+
 function Item({
   item,
   busy,
   onAnswer,
   onInvalid,
+  books,
+  onBook,
 }: {
   item: TranscriptItem;
   busy: boolean;
   onAnswer: (id: number, a: AnswerPayload) => void;
   onInvalid: (id: number, d: string) => void;
+  books: LinkBook[];
+  onBook: (book: number, page: number) => void;
 }) {
-  if (item.type === "assistant") return <Markdown text={item.text} className="prose-lesson" />;
+  if (item.type === "assistant") return <Prose text={item.text} className="prose-lesson" books={books} onBook={onBook} />;
   if (item.type === "user") return <Said>{item.text}</Said>;
   if (item.type === "event") {
     return (
@@ -187,6 +215,8 @@ export default function SessionPage() {
   const [status, setStatus] = useState("");
   const [message, setMessage] = useState("");
   const [showHistory, setShowHistory] = useState(false);
+  const [book, setBook] = useState<{ id: number; page: number } | null>(null);
+  const openBook = useCallback((id: number, page: number) => setBook({ id, page }), []);
   const [sheet, setSheet] = useState<null | "side" | "parking" | "plan" | "finish">(null);
   const [now, setNow] = useState(() => Date.now());
   const started = useRef(false);
@@ -310,7 +340,16 @@ export default function SessionPage() {
         icon="book"
         crumbs={[{ label: view.topic.title, href: `/topics/${view.topic.id}` }, { label: KIND[view.kind] }]}
         busy={waiting}
-        right={<Timer startedAt={view.startedAt} endedAt={view.endedAt} planned={view.plannedMinutes} />}
+        right={
+          <>
+            {view.books.length > 0 && (
+              <Button small variant="ghost" onClick={() => setBook({ id: (view.books.find((b) => b.role === "main") ?? view.books[0]).id, page: book?.page ?? 1 })} title="Открыть учебник рядом с уроком">
+                <Icon name="book" size={14} /> Книга
+              </Button>
+            )}
+            <Timer startedAt={view.startedAt} endedAt={view.endedAt} planned={view.plannedMinutes} />
+          </>
+        }
         status={
           <>
             <StatusItem icon="file">{view.topic.title}</StatusItem>
@@ -348,10 +387,10 @@ export default function SessionPage() {
         )}
 
         {shown.map((it, i) => (
-          <Item key={it.type === "question" ? `q${it.attemptId}` : `${(showHistory ? 0 : boundary) + i}-${it.type}`} item={it} busy={waiting} onAnswer={onAnswer} onInvalid={onInvalid} />
+          <Item key={it.type === "question" ? `q${it.attemptId}` : `${(showHistory ? 0 : boundary) + i}-${it.type}`} item={it} busy={waiting} onAnswer={onAnswer} onInvalid={onInvalid} books={view.books} onBook={openBook} />
         ))}
 
-        {streaming && <Markdown text={streaming} className="prose-lesson streaming" />}
+        {streaming && <Prose text={streaming} className="prose-lesson streaming" books={view.books} onBook={openBook} />}
         {waiting && (
           <div className="appear flex items-center gap-2.5 text-sm text-muted" aria-live="polite">
             <Dots /> {status || (streaming ? "" : "Репетитор работает…")}
@@ -455,6 +494,9 @@ export default function SessionPage() {
 
       <SidePanel view={view} open={sheet === "side"} onClose={() => setSheet(null)} onChanged={load} />
       <ParkingSheet view={view} open={sheet === "parking"} onClose={() => setSheet(null)} onChanged={load} />
+      <Sheet open={!!book} onClose={() => setBook(null)} title={view.books.find((b) => b.id === book?.id)?.name ?? "Книга"} wide>
+        {book && <BookViewer key={book.id} bookId={book.id} page={book.page} />}
+      </Sheet>
       <Sheet open={sheet === "plan"} onClose={() => setSheet(null)} title="План обучения" wide>
         <PlanGraph plan={view.plan} />
       </Sheet>

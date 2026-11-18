@@ -9,8 +9,8 @@ interface EditSection {
   title: string;
   summary: string;
   refs: number[];
-  /** Labels of the referenced book sections, for display. */
-  sources: string[];
+  /** The referenced book sections, for display: label and where it opens. */
+  sources: { label: string; href: string }[];
 }
 
 interface EditModule {
@@ -33,7 +33,7 @@ const fromView = (modules: ModuleView[]): EditModule[] =>
       title: m.title,
       summary: m.summary,
       hours: m.hours,
-      sections: m.sections.map((s) => ({ title: s.title, summary: s.summary, refs: s.refs, sources: s.sources.map((x) => `${x.book} · ${pages(x.pageFrom, x.pageTo)}`) })),
+      sections: m.sections.map((s) => ({ title: s.title, summary: s.summary, refs: s.refs, sources: s.sources.map((x) => ({ label: `${x.book} · ${pages(x.pageFrom, x.pageTo)}`, href: `/book/${x.bookId}?page=${x.pageFrom}` })) })),
     }));
 
 function move<T>(list: T[], i: number, d: number): T[] {
@@ -114,7 +114,7 @@ function BookPicker({ semesterId, books, onPick, onClose }: { semesterId: number
             disabled={!chosen.length}
             onClick={() => {
               const picked = (list ?? []).filter((s) => chosen.includes(s.id));
-              onPick(picked.map((s) => ({ title: s.title, summary: "", refs: [s.id], sources: [`${book?.name} · ${pages(s.pageFrom, s.pageTo)}`] })));
+              onPick(picked.map((s) => ({ title: s.title, summary: "", refs: [s.id], sources: [{ label: `${book?.name} · ${pages(s.pageFrom, s.pageTo)}`, href: `/book/${book?.id}?page=${s.pageFrom}` }] })));
               onClose();
             }}
           >
@@ -225,9 +225,9 @@ export function ProgramEditor({
                       <input className="min-w-[12rem] flex-1 bg-transparent px-1 py-0.5 text-sm focus:outline-none" value={s.title} onChange={(e) => setSection(i, j, { title: e.target.value })} aria-label="Название раздела" />
                       {s.sources.length ? (
                         s.sources.map((src) => (
-                          <Badge key={src} tone="accent">
-                            {src}
-                          </Badge>
+                          <a key={src.href} href={src.href} target="_blank" rel="noreferrer" title="Открыть страницу книги в новой вкладке">
+                            <Badge tone="accent">{src.label}</Badge>
+                          </a>
                         ))
                       ) : hasBooks ? (
                         <Badge tone="warn">не из твоих материалов</Badge>

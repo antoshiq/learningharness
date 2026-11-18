@@ -1,7 +1,10 @@
 // Reading books for lessons: pages, sections and full-text search. Kept apart
 // from books.ts (which calls the model to build outlines) so that the lesson
 // tools can use it without pulling the model layer into their imports.
+import fs from "node:fs";
+import path from "node:path";
 import { and, asc, eq, sql } from "drizzle-orm";
+import { DATA_DIR } from "./paths";
 import { getDb, schema } from "./db";
 import type { BookRole } from "./db/schema";
 
@@ -101,4 +104,53 @@ export function searchBooks(bookIds: number[], query: string, limit = 12): BookH
     )
     .all(q, ...bookIds, limit) as BookHit[];
   return rows.map((r) => ({ ...r, snippet: r.snippet.replace(/\s+/g, " ").trim() }));
+}
+
+export interface BookInfo {
+  id: number;
+  name: string;
+  format: "pdf" | "text";
+  pages: number;
+  /** The original file is on disk (it is not part of database backups). */
+  hasFile: boolean;
+  semesterId: number | null;
+  sections: { id: number; level: number; title: string; pageFrom: number; pageTo: number }[];
+}
+
+/** Path of a book's original file, if it is still on disk. */
+export function bookFilePath(file: string | null): string | null {
+  if (!file || !/^\d+\.(pdf|txt)$/.test(file)) return null;
+  const p = path.join(DATA_DIR, "books", file);
+  return fs.existsSync(p) ? p : null;
+}
+
+export function bookInfo(bookId: number): BookInfo {
+  const db = getDb();
+  const b = db.select().from(schema.books).where(eq(schema.books.id, bookId)).get();
+  if (!b) throw new Error("Книга не найдена");
+  return {
+    id: b.id,
+    name: b.name,
+    format: b.format,
+    pages: b.pages,
+    hasFile: !!bookFilePath(b.file),
+    semesterId: b.semesterId,
+    sections: db
+      .select({ id: schema.bookSections.id, level: schema.bookSections.level, title: schema.bookSections.title, pageFrom: schema.bookSections.pageFrom, pageTo: schema.bookSections.pageTo })
+      .from(schema.bookSections)
+      .where(eq(schema.bookSections.bookId, bookId))
+      .orderBy(asc(schema.bookSections.idx))
+      .all(),
+  };
+}
+
+/** The stored text of one page (also what OCR recognized on a scan). */
+export function pageText(bookId: number, page: number): string {
+  return (
+    getDb()
+      .select({ text: schema.bookPages.text })
+      .from(schema.bookPages)
+      .where(and(eq(schema.bookPages.bookId, bookId), eq(schema.bookPages.page, page)))
+      .get()?.text ?? ""
+  );
 }

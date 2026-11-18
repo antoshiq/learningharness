@@ -429,8 +429,9 @@ export async function ocrBook(bookId: number, onProgress?: (done: number, total:
       let text = "";
       try {
         text = clean(await ocrPdfPage(doc, w.page));
-      } catch {
+      } catch (e) {
         // A page that cannot be read stays empty; the rest of the book is still useful.
+        console.error(`OCR: book ${bookId}, page ${w.page}:`, e);
       }
       done++;
       db.transaction((tx) => {

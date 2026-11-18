@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "./db";
 import { isRunning } from "./agent/run";
 import { dueNodes, isHiddenText, planView } from "./agent/state";
+import { semesterBookIds } from "./agent/tools";
 import { isText, isToolUse } from "./llm/types";
 import type { PlanNodeView, SessionSummary, TranscriptItem, UsageTotals } from "@/lib/types";
 
@@ -61,6 +62,8 @@ export interface SessionView {
   usage: UsageTotals;
   side: { role: "user" | "assistant"; text: string }[];
   parkingOpen: number;
+  /** Books of the semester a module topic belongs to: page references in the lesson open them. */
+  books: { id: number; name: string; role: string }[];
 }
 
 export function getSessionView(id: number): SessionView | null {
@@ -129,6 +132,13 @@ export function getSessionView(id: number): SessionView | null {
       .where(eq(schema.sideMessages.sessionId, id))
       .orderBy(schema.sideMessages.id)
       .all(),
+    books: semesterBookIds(db, topic).length
+      ? db
+          .select({ id: schema.books.id, name: schema.books.name, role: schema.books.role })
+          .from(schema.books)
+          .where(inArray(schema.books.id, semesterBookIds(db, topic)))
+          .all()
+      : [],
     parkingOpen: db
       .select({ n: sql<number>`count(*)` })
       .from(schema.parking)
