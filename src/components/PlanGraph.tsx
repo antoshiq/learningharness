@@ -49,7 +49,8 @@ export function statusLabel(n: PlanNodeView): { text: string; tone: "ok" | "warn
   return { text: "закрыт", tone: "neutral" };
 }
 
-export function PlanGraph({ plan }: { plan: PlanNodeView[] }) {
+/** `onTheory` adds a link from the chosen idea to its theory from lessons. */
+export function PlanGraph({ plan, onTheory }: { plan: PlanNodeView[]; onTheory?: (key: string) => void }) {
   const [selected, setSelected] = useState<string | null>(null);
 
   const { nodes, edges } = useMemo(() => {
@@ -149,6 +150,11 @@ export function PlanGraph({ plan }: { plan: PlanNodeView[] }) {
             <span className="text-[15px] font-semibold text-bright">{sel.title}</span>
             <Badge tone={statusLabel(sel).tone}>{statusLabel(sel).text}</Badge>
             {sel.status !== "new" && sel.dueAt && <Badge>{formatDue(sel.dueAt)}</Badge>}
+            {onTheory && (
+              <button className="ml-auto text-sm text-accent hover:underline" onClick={() => onTheory(sel.key)}>
+                Теория по идее
+              </button>
+            )}
           </div>
           {sel.summary && <p className="mt-1.5 max-w-[68ch] text-[15px] text-muted">{sel.summary}</p>}
           <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm">

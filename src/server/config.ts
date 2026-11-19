@@ -4,12 +4,14 @@ import { eq } from "drizzle-orm";
 import { SECRETS_FILE } from "./paths";
 import { getDb, schema } from "./db";
 import { spentSince, startOfDay } from "./stats";
-import type { AppConfig, ProviderId, RoleConfig } from "@/lib/types";
+import { THEORY_DEPTHS, type AppConfig, type ProviderId, type RoleConfig, type TheoryDepth } from "@/lib/types";
 
 interface Secrets {
   anthropic?: string;
   openrouter?: string;
   custom?: string;
+  /** GitHub sign-in for Copilot (an OAuth token from the device flow). */
+  copilot?: string;
 }
 
 export function readSecrets(): Secrets {
@@ -22,7 +24,7 @@ export function readSecrets(): Secrets {
 
 export function writeSecrets(patch: Secrets) {
   const next = { ...readSecrets() };
-  for (const k of ["anthropic", "openrouter", "custom"] as const) {
+  for (const k of ["anthropic", "openrouter", "custom", "copilot"] as const) {
     if (patch[k] === undefined) continue;
     if (patch[k] === "") delete next[k];
     else next[k] = patch[k]!.trim();
@@ -33,7 +35,7 @@ export function writeSecrets(patch: Secrets) {
   fs.renameSync(tmp, SECRETS_FILE);
 }
 
-export function apiKey(provider: "anthropic" | "openrouter" | "custom"): string | undefined {
+export function apiKey(provider: keyof Secrets): string | undefined {
   const saved = readSecrets()[provider];
   if (saved) return saved;
   if (provider === "anthropic") return process.env.ANTHROPIC_API_KEY || undefined;
@@ -66,7 +68,12 @@ export function getRoles(): AppConfig["roles"] {
     const mock: RoleConfig = { provider: "mock", model: "mock" };
     return { strong: mock, cheap: mock };
   }
-  return { ...DEFAULT_ROLES, ...getSetting<Partial<AppConfig["roles"]>>("roles", {}) };
+  const roles = { ...DEFAULT_ROLES, ...getSetting<Partial<AppConfig["roles"]>>("roles", {}) };
+  // Gemini CLI stopped working and was replaced by Antigravity (same Google sign-in, other model names).
+  for (const r of ["strong", "cheap"] as const) {
+    if ((roles[r].provider as string) === "gemini-cli") roles[r] = { provider: "antigravity", model: "default" };
+  }
+  return roles;
 }
 
 export const getCustomBaseUrl = () => getSetting<string>("customBaseUrl", "");
@@ -78,6 +85,12 @@ export const getDailyLimit = () => getSetting<number | null>("dailyLimit", null)
 export const DEFAULT_GOAL = 10;
 export const getDailyGoal = () => getSetting<number>("dailyGoal", DEFAULT_GOAL);
 
+/** How much theory a new idea gets in lessons. */
+export function getTheoryDepth(): TheoryDepth {
+  const v = getSetting<string>("theoryDepth", "balanced");
+  return (THEORY_DEPTHS as string[]).includes(v) ? (v as TheoryDepth) : "balanced";
+}
+
 export function getConfig(): AppConfig {
   return {
     roles: getRoles(),
@@ -87,15 +100,17 @@ export function getConfig(): AppConfig {
       openrouter: !!apiKey("openrouter"),
       custom: !!getCustomBaseUrl(),
       customKey: !!apiKey("custom"),
+      copilot: !!apiKey("copilot"),
     },
     mockEnabled: mockEnabled(),
     dailyLimit: getDailyLimit(),
     spentToday: spentSince(startOfDay()),
     dailyGoal: getDailyGoal(),
+    theoryDepth: getTheoryDepth(),
   };
 }
 
-export const PROVIDERS: ProviderId[] = ["anthropic", "openrouter", "custom", "claude-code", "codex", "gemini-cli"];
+export const PROVIDERS: ProviderId[] = ["anthropic", "openrouter", "custom", "claude-code", "codex", "antigravity", "copilot"];
 
 export function updateConfig(patch: {
   roles?: Partial<AppConfig["roles"]>;
@@ -103,7 +118,12 @@ export function updateConfig(patch: {
   keys?: Secrets;
   dailyLimit?: number | null;
   dailyGoal?: number;
+  theoryDepth?: TheoryDepth;
 }) {
+  if (patch.theoryDepth !== undefined) {
+    if (!THEORY_DEPTHS.includes(patch.theoryDepth)) throw new Error("Неизвестная глубина теории");
+    setSetting("theoryDepth", patch.theoryDepth);
+  }
   if (patch.dailyGoal !== undefined) {
     const g = Math.round(Number(patch.dailyGoal));
     if (!Number.isFinite(g) || g < 1 || g > 500) throw new Error("Цель — от 1 до 500 ответов в день");
@@ -141,5 +161,6 @@ export function roleProblem(role: RoleConfig): string | null {
   if (role.provider === "anthropic" && !apiKey("anthropic")) return "Не задан ключ Anthropic";
   if (role.provider === "openrouter" && !apiKey("openrouter")) return "Не задан ключ OpenRouter";
   if (role.provider === "custom" && !getCustomBaseUrl()) return "Не задан адрес своего сервера";
+  if (role.provider === "copilot" && !apiKey("copilot")) return "Не выполнен вход в GitHub Copilot";
   return null;
 }

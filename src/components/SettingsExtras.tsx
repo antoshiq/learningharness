@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, formatDate } from "@/lib/api";
 import { THEME_LABEL, UI_LABEL, useThemePref, useUiStyle, type ThemePref, type UiStyle } from "@/lib/theme";
-import type { AppConfig } from "@/lib/types";
+import type { AppConfig, TheoryDepth } from "@/lib/types";
 import { Badge, Button, Card, cx, Icon, inputClass, Notice, Segmented, Sheet } from "./ui";
 import { notifyChanged } from "./workbench-context";
 
@@ -60,6 +60,44 @@ export function GoalCard({ cfg, put }: { cfg: AppConfig; put: (body: unknown) =>
         </Button>
       </div>
       {!valid && <p className="text-sm text-bad">От 1 до 500</p>}
+    </Card>
+  );
+}
+
+const DEPTH_OPTIONS: { value: TheoryDepth; label: string; text: string }[] = [
+  { value: "brief", label: "Кратко", text: "Суть, формулировка и один пример, дальше сразу задачи. Подробнее — по кнопке на уроке." },
+  { value: "balanced", label: "Обычно", text: "Зачем, точная формулировка, интуиция, разобранные примеры и частые ошибки, затем проверка." },
+  { value: "detailed", label: "Подробно", text: "Основательная теория на несколько экранов: выводы и доказательства, примеры разной сложности, связи с другими идеями." },
+];
+
+/** How much theory the tutor gives on a new idea before the questions. */
+export function TheoryCard({ cfg, put }: { cfg: AppConfig; put: (body: unknown) => Promise<void> }) {
+  return (
+    <Card className="space-y-3">
+      <div id="theory" className="scroll-mt-20">
+        <h2 className="text-[15px] font-semibold text-bright">Теория в уроках</h2>
+        <p className="mt-1 text-sm text-muted">
+          Сколько объяснять новую идею перед вопросами. Длинная теория идёт по экранам с кнопкой «Дальше», а «Объясни подробнее» на уроке разберёт текущую идею глубже
+          при любом выборе. Действует с ближайшего хода.
+        </p>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {DEPTH_OPTIONS.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => o.value !== cfg.theoryDepth && put({ theoryDepth: o.value })}
+            aria-pressed={o.value === cfg.theoryDepth}
+            className={cx(
+              "rounded-md border p-3 text-left transition-colors",
+              o.value === cfg.theoryDepth ? "border-accent bg-accent-soft" : "border-border hover:bg-surface-2",
+            )}
+          >
+            <div className="text-sm font-medium text-bright">{o.label}</div>
+            <div className="mt-1 text-xs text-muted">{o.text}</div>
+          </button>
+        ))}
+      </div>
     </Card>
   );
 }

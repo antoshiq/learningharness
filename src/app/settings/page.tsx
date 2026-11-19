@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge, Button, Card, cx, inputClass, Loading, Notice, Page, TopNav } from "@/components/ui";
-import { AppearanceCard, DataCard, GoalCard, LimitCard } from "@/components/SettingsExtras";
+import { AppearanceCard, DataCard, GoalCard, LimitCard, TheoryCard } from "@/components/SettingsExtras";
 import { api } from "@/lib/api";
 import type { AppConfig, ProviderId, RoleConfig } from "@/lib/types";
 
@@ -12,7 +12,8 @@ const PROVIDER_LABEL: Record<Exclude<ProviderId, "mock">, string> = {
   custom: "Свой сервер",
   "claude-code": "Подписка Claude",
   codex: "Подписка ChatGPT",
-  "gemini-cli": "Аккаунт Google (Gemini)",
+  antigravity: "Аккаунт Google (Antigravity)",
+  copilot: "GitHub Copilot",
 };
 const SUGGEST: Record<string, string[]> = {
   anthropic: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-2"],
@@ -20,13 +21,15 @@ const SUGGEST: Record<string, string[]> = {
   custom: [],
   "claude-code": ["opus", "sonnet", "haiku"],
   codex: ["default", "gpt-6.2-sol", "gpt-6.1-sol", "gpt-6-sol", "gpt-5.5"],
-  "gemini-cli": ["auto", "pro", "flash", "flash-lite", "gemini-3.1-pro-preview", "gemini-3.5-flash", "gemini-2.5-pro"],
+  antigravity: ["default"],
+  copilot: [],
 };
 const PLACEHOLDER: Partial<Record<ProviderId, string>> = {
   openrouter: "например anthropic/claude-sonnet-5.5",
   "claude-code": "opus, sonnet или haiku",
   codex: "default — модель по умолчанию в Codex",
-  "gemini-cli": "auto, pro или flash",
+  antigravity: "default — модель, выбранная в agy",
+  copilot: "загрузи список моделей кнопкой ниже",
 };
 const code = "rounded-sm bg-code px-1 py-px font-mono text-xs text-text";
 
@@ -176,6 +179,95 @@ function RoleEditor({
   );
 }
 
+/** Sign in to GitHub for Copilot: GitHub shows a code, the owner types it on github.com, the page waits. */
+function CopilotLogin({ signedIn, onChange }: { signedIn: boolean; onChange: (c: AppConfig) => void }) {
+  const [pending, setPending] = useState<{ userCode: string; verificationUri: string } | null>(null);
+  const [msg, setMsg] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+
+  const poll = (interval: number) => {
+    timer.current = setTimeout(async () => {
+      try {
+        const r = await api<{ status: string; config?: AppConfig }>("/api/settings/copilot", { body: { action: "poll" } });
+        if (r.status === "done" && r.config) {
+          setPending(null);
+          setMsg({ tone: "ok", text: "Вход выполнен. Теперь в «Моделях» выбери «GitHub Copilot» и загрузи список моделей." });
+          onChange(r.config);
+          return;
+        }
+        poll(r.status === "slow_down" ? interval + 5 : interval);
+      } catch (e) {
+        setPending(null);
+        setMsg({ tone: "bad", text: e instanceof Error ? e.message : String(e) });
+      }
+    }, interval * 1000);
+  };
+
+  const start = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await api<{ userCode: string; verificationUri: string; interval: number }>("/api/settings/copilot", { body: { action: "start" } });
+      setPending(r);
+      try {
+        await navigator.clipboard.writeText(r.userCode);
+      } catch {
+        /* copying is only a convenience */
+      }
+      window.open(r.verificationUri, "_blank", "noopener");
+      poll(r.interval);
+    } catch (e) {
+      setMsg({ tone: "bad", text: e instanceof Error ? e.message : String(e) });
+    }
+    setBusy(false);
+  };
+
+  const signOut = async () => {
+    if (timer.current) clearTimeout(timer.current);
+    setPending(null);
+    setMsg(null);
+    try {
+      onChange(await api<AppConfig>("/api/settings/copilot", { method: "DELETE" }));
+    } catch (e) {
+      setMsg({ tone: "bad", text: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {signedIn ? <Badge tone="ok">вход выполнен</Badge> : <Badge>нет входа</Badge>}
+        <Button small variant={signedIn ? "ghost" : "primary"} disabled={busy || !!pending} onClick={start}>
+          {signedIn ? "Войти заново" : "Войти через GitHub"}
+        </Button>
+        {signedIn && (
+          <Button small variant="ghost" onClick={signOut}>
+            Выйти
+          </Button>
+        )}
+      </div>
+      {pending && (
+        <Notice tone="warn">
+          Открой{" "}
+          <a className="underline" href={pending.verificationUri} target="_blank" rel="noopener noreferrer">
+            {pending.verificationUri}
+          </a>{" "}
+          и введи код <code className="rounded-sm bg-code px-1.5 py-0.5 font-mono text-sm text-bright">{pending.userCode}</code> (он уже скопирован). Жду
+          подтверждения…
+        </Notice>
+      )}
+      {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const [cfg, setCfg] = useState<AppConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -292,21 +384,42 @@ export default function SettingsPage() {
                 </ol>
               </div>
               <div className="text-sm text-muted">
-                <div className="text-bright">Gemini через Gemini CLI</div>
+                <div className="text-bright">Аккаунт Google через Antigravity</div>
                 <ol className="mt-1 list-decimal space-y-1 pl-5">
                   <li>
-                    Установи: <code className={code}>npm install -g @google/gemini-cli</code>
+                    Установи Antigravity CLI (<code className={code}>agy</code>) с{" "}
+                    <a className="underline" href="https://antigravity.google" target="_blank" rel="noopener noreferrer">
+                      antigravity.google
+                    </a>
+                    .
                   </li>
                   <li>
-                    Запусти <code className={code}>gemini</code> и выбери «Login with Google». Бесплатная квота есть у любого аккаунта, у Google AI Pro и Ultra
-                    она больше.
+                    Запусти <code className={code}>agy</code> в терминале и войди через Google. Там же командой <code className={code}>/model</code> можно выбрать
+                    модель по умолчанию.
                   </li>
-                  <li>В «Моделях» выбери «Аккаунт Google (Gemini)» и модель: auto, pro или flash.</li>
+                  <li>
+                    В «Моделях» выбери «Аккаунт Google (Antigravity)». Модель default берёт ту, что выбрана в agy; «Загрузить список моделей» покажет остальные,
+                    доступные в Antigravity.
+                  </li>
                 </ol>
               </div>
               <p className="text-sm text-muted">
-                Лимиты общие с Codex, ChatGPT и Gemini CLI. Ответ приходит чуть медленнее, чем по API-ключу: на каждый шаг запускается программа. Стоимость не
+                Лимиты общие с Codex, ChatGPT и Antigravity. Ответ приходит чуть медленнее, чем по API-ключу: на каждый шаг запускается программа. Стоимость не
                 показывается, только токены. Используй это подключение только для себя.
+              </p>
+            </Card>
+
+            <Card className="space-y-3">
+              <h2 className="text-[15px] font-semibold text-bright">GitHub Copilot</h2>
+              <p className="text-sm text-muted">
+                Можно учиться на подписке Copilot (подойдёт и бесплатный план) без API-ключа: войди через GitHub один раз, дальше приложение обращается к Copilot
+                напрямую. Доступны модели твоего плана. Инструменты урока и фото решений работают так же, как по API-ключу.
+              </p>
+              <CopilotLogin signedIn={cfg.has.copilot} onChange={setCfg} />
+              <p className="text-sm text-muted">
+                Расходуются запросы твоего плана Copilot (у сильных моделей это premium requests), стоимость в приложении не показывается. Вход хранится вместе с
+                ключами в <code className={code}>.tutor/secrets.json</code>. Это тот же вход, что у плагинов Copilot для редакторов. GitHub не описывает его для
+                сторонних программ, так что он может перестать работать. Используй его только для себя.
               </p>
             </Card>
 
@@ -330,6 +443,7 @@ export default function SettingsPage() {
               />
             </Card>
 
+            <TheoryCard cfg={cfg} put={put} />
             <GoalCard key={`goal-${cfg.dailyGoal}`} cfg={cfg} put={put} />
             <LimitCard key={String(cfg.dailyLimit)} cfg={cfg} put={put} />
             <AppearanceCard />

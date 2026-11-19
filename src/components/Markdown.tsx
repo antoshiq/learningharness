@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { openInSandbox, sandboxLanguage } from "@/lib/sandbox";
 import { Mermaid } from "./Mermaid";
+import { Plot } from "./Plot";
 
 /**
  * Models often write \( ... \) and \[ ... \]; the math plugin only knows
@@ -28,12 +29,13 @@ export function normalizeMath(src: string): string {
 const textOf = (n: ReactNode): string =>
   typeof n === "string" ? n : Array.isArray(n) ? n.map(textOf).join("") : isValidElement<{ children?: ReactNode }>(n) ? textOf(n.props.children) : "";
 
-/** Code blocks: Mermaid becomes a diagram; Python and JavaScript get a "run in sandbox" button. */
+/** Code blocks: Mermaid becomes a diagram, plot a function graph; Python and JavaScript get a "run in sandbox" button. */
 function Pre({ children, ...rest }: React.HTMLAttributes<HTMLPreElement> & { node?: unknown }) {
   const code = isValidElement<{ className?: string; children?: ReactNode }>(children) ? children : null;
   const lang = /language-([\w-]+)/.exec(code?.props.className ?? "")?.[1];
   const source = code ? textOf(code.props.children).replace(/\n$/, "") : "";
   if (lang === "mermaid") return <Mermaid code={source} />;
+  if (lang === "plot") return <Plot code={source} />;
   const run = sandboxLanguage(lang);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { node, ...attrs } = rest;

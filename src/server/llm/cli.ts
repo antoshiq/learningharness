@@ -1,5 +1,5 @@
 // Running a model through a command-line program installed on this computer
-// (Codex for a ChatGPT plan, Gemini CLI for a Google account). The program is
+// (Codex for a ChatGPT plan, Antigravity for a Google account). The program is
 // signed in with the owner's own account, so no API key is involved.
 import { spawn } from "node:child_process";
 import fs from "node:fs";

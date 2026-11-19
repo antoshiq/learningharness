@@ -1,5 +1,5 @@
-// OpenAI-compatible chat-completions adapter: OpenRouter and custom endpoints
-// (Ollama, LM Studio, vLLM, any other compatible server).
+// OpenAI-compatible chat-completions adapter: OpenRouter, GitHub Copilot and
+// custom endpoints (Ollama, LM Studio, vLLM, any other compatible server).
 import {
   LlmError,
   isImage,
@@ -56,18 +56,37 @@ export function toOpenAiMessages(system: string, messages: ChatMsg[]): OaiMsg[] 
   return out;
 }
 
-interface Opts {
-  id: string;
+export interface Connection {
   baseUrl: string;
   apiKey?: string;
+  /** Extra headers for every request. */
+  headers?: Record<string, string>;
+}
+
+interface Opts {
+  id: string;
+  /** Where to send requests; a function when the address or key is looked up per request (Copilot). */
+  connect: Connection | (() => Promise<Connection>);
   /** OpenRouter: ask for real cost in the usage object. */
   openrouter?: boolean;
+  /** Name in error messages. */
+  label?: string;
+  /** Extra headers for a request with pictures (Copilot wants to be told). */
+  visionHeaders?: Record<string, string>;
+  /** Error text for 401 (the default speaks of an API key). */
+  unauthorized?: string;
+  /** Picks model names out of the /models list (default: every id). */
+  pickModels?: (list: Record<string, unknown>[]) => string[];
 }
 
 export function openAiProvider(opts: Opts): LlmProvider {
-  const headers: Record<string, string> = { "content-type": "application/json" };
-  if (opts.apiKey) headers.authorization = `Bearer ${opts.apiKey}`;
-  const label = opts.openrouter ? "OpenRouter" : "Сервер модели";
+  const label = opts.label ?? (opts.openrouter ? "OpenRouter" : "Сервер модели");
+  const connect = async () => {
+    const c = typeof opts.connect === "function" ? await opts.connect() : opts.connect;
+    const headers: Record<string, string> = { "content-type": "application/json", ...c.headers };
+    if (c.apiKey) headers.authorization = `Bearer ${c.apiKey}`;
+    return { baseUrl: c.baseUrl, headers };
+  };
 
   async function fail(res: Response): Promise<never> {
     let detail = "";
@@ -80,7 +99,7 @@ export function openAiProvider(opts: Opts): LlmProvider {
         detail = body.slice(0, 300);
       }
     } catch {}
-    if (res.status === 401) throw new LlmError(`${label}: неверный API-ключ`, 401);
+    if (res.status === 401) throw new LlmError(opts.unauthorized ?? `${label}: неверный API-ключ`, 401);
     if (res.status === 402) throw new LlmError(`${label}: недостаточно средств на счёте`, 402);
     if (res.status === 404) throw new LlmError(`${label}: модель или адрес не найдены. ${detail}`, 404);
     if (res.status === 429) throw new LlmError(`${label}: превышен лимит запросов`, 429);
@@ -108,16 +127,18 @@ export function openAiProvider(opts: Opts): LlmProvider {
         body.max_tokens = req.maxTokens ?? 32000;
       }
 
+      const { baseUrl, headers } = await connect();
+      if (opts.visionHeaders && req.messages.some((m) => m.content.some(isImage))) Object.assign(headers, opts.visionHeaders);
       let res: Response;
       try {
-        res = await fetch(`${opts.baseUrl}/chat/completions`, {
+        res = await fetch(`${baseUrl}/chat/completions`, {
           method: "POST",
           headers,
           body: JSON.stringify(body),
           signal: req.signal,
         });
       } catch (e) {
-        throw new LlmError(`${label}: нет соединения (${opts.baseUrl}). ${e instanceof Error ? e.message : ""}`, 0);
+        throw new LlmError(`${label}: нет соединения (${baseUrl}). ${e instanceof Error ? e.message : ""}`, 0);
       }
       if (!res.ok || !res.body) await fail(res);
 
@@ -197,16 +218,18 @@ export function openAiProvider(opts: Opts): LlmProvider {
     },
 
     async listModels() {
+      const { baseUrl, headers } = await connect();
       let res: Response;
       try {
-        res = await fetch(`${opts.baseUrl}/models`, { headers });
+        res = await fetch(`${baseUrl}/models`, { headers });
       } catch {
-        throw new LlmError(`${label}: нет соединения (${opts.baseUrl})`, 0);
+        throw new LlmError(`${label}: нет соединения (${baseUrl})`, 0);
       }
       if (!res.ok) await fail(res);
       const j = await res.json();
-      const list: { id: string }[] = Array.isArray(j) ? j : (j.data ?? []);
-      return list.map((m) => m.id).filter(Boolean).sort();
+      const list: Record<string, unknown>[] = Array.isArray(j) ? j : (j.data ?? []);
+      const ids = opts.pickModels ? opts.pickModels(list) : list.map((m) => m.id);
+      return [...new Set(ids.filter((id): id is string => typeof id === "string" && !!id))].sort();
     },
   };
 }

@@ -9,7 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createSdkMcpServer, query, tool, type Options, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { eq } from "drizzle-orm";
-import { getRoles } from "../config";
+import { getRoles, getTheoryDepth } from "../config";
 import { getDb, schema } from "../db";
 import type { PendingState } from "../db/schema";
 import {
@@ -30,7 +30,7 @@ import {
 import { DATA_DIR } from "../paths";
 import type { StreamEvent } from "@/lib/types";
 import { systemPrompt } from "./prompts";
-import { executeTool, semesterBookIds, toolShapes } from "./tools";
+import { executeToolAsync, semesterBookIds, toolShapes } from "./tools";
 
 const SERVER = "tutor";
 const MAX_TURNS = 60;
@@ -239,7 +239,8 @@ async function attempt(sessionId: number, cc: { sessionId: string; sent: number 
         if (s.name === "read_book" || s.name === "search_book") emit({ type: "status", text: "Читаю учебник…" });
         const id = `cc_${Date.now().toString(36)}_${seq++}`;
         calls.push({ type: "tool_use", id, name: s.name, input: args });
-        const out = executeTool(ctx, s.name, id, args);
+        if (s.name === "run_python") emit({ type: "status", text: "Проверяю вычисления…" });
+        const out = await executeToolAsync(ctx, s.name, id, args);
         if (out.pendingAttemptId !== undefined) {
           pending = { toolUseId: id, attemptId: out.pendingAttemptId };
           stop = true;
@@ -255,7 +256,7 @@ async function attempt(sessionId: number, cc: { sessionId: string; sent: number 
   const q = query({
     prompt: renderPrompt(history, cc?.sent ?? 0),
     options: {
-      ...baseOptions(model, systemPrompt(session.kind, topic.kind) + ENV_NOTE),
+      ...baseOptions(model, systemPrompt(session.kind, topic.kind, getTheoryDepth()) + ENV_NOTE),
       ...(cc ? { resume: cc.sessionId } : {}),
       mcpServers: { [SERVER]: server },
       allowedTools: specs.map((s) => `mcp__${SERVER}__${s.name}`),

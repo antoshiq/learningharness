@@ -149,6 +149,8 @@ export function mockProvider(): LlmProvider {
       if (lastText.includes("завершает сессию")) {
         return done([call("end_session", { learned: ["сложение"], weak: [], next: "функции" })]);
       }
+      // "Объясни подробнее": a theory step with no question; the learner reads and presses "Дальше".
+      if (lastText.includes("[система] Подробнее")) return done([say("(тест) Подробное объяснение: сложение объединяет два числа в одно.")]);
       const step = req.messages.filter((m) => m.role === "assistant").length;
       const attemptId = Number(/attempt_id: (\d+)/.exec(results.map((r) => r.content).join("\n"))?.[1] ?? 0);
 

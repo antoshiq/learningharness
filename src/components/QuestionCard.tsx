@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { parsonsLines, seededShuffle } from "@/lib/grading";
 import { runCode, type RunOutcome } from "@/lib/runner";
 import { KIND_LABEL, PURPOSE_LABEL, type AnswerPayload, type Outcome, type Question, type TranscriptItem } from "@/lib/types";
@@ -9,6 +9,7 @@ import { CodeEditor } from "./CodeEditor";
 import { EditorFrame, toolButton } from "./EditorTools";
 import { Markdown } from "./Markdown";
 import { PhotoButton } from "./PhotoButton";
+import { FormulaButton, insertAtCursor } from "./FormulaButton";
 import { Badge, Button, cx, Dots, Icon, inputClass, isKey, isSubmitKey, Kbd, KeyHandler, Mark, Notice, Segmented } from "./ui";
 
 export type QItem = Extract<TranscriptItem, { type: "question" }>;
@@ -109,6 +110,7 @@ export function ActiveQuestion({
   const [prep, setPrep] = useState<Prep | null>(runnable ? null : { state: "ready" });
   const [choice, setChoice] = useState<number | null>(null);
   const [text, setText] = useState("");
+  const answerBox = useRef<HTMLTextAreaElement>(null);
   const [code, setCode] = useState(q.kind === "code" || q.kind === "find_bug" ? (q.code ?? "") : "");
   const [rows, setRows] = useState(() =>
     seededShuffle([...parsonsLines(q.solution ?? ""), ...(q.distractors ?? [])], seed ?? item.attemptId).map((t) => ({ text: t, used: true })),
@@ -296,13 +298,26 @@ export function ActiveQuestion({
       {(q.kind === "free" || q.kind === "math") && (
         <div className="space-y-2">
           <textarea
+            ref={answerBox}
             className={cx(inputClass, "min-h-32 resize-y", q.kind === "math" && "font-mono text-[15px]")}
             placeholder={q.kind === "math" ? "Пиши решение по шагам, каждый шаг с новой строки. Формулы можно в $...$" : "Твой ответ своими словами"}
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
-          <PhotoButton context={q.prompt} onText={(t) => setText((cur) => (cur.trim() ? `${cur.trimEnd()}\n\n${t}` : t))} />
-          {q.kind === "math" && text.includes("$") && (
+          <div className="flex flex-wrap items-start gap-2">
+            <FormulaButton
+              onInsert={(s) => {
+                const r = insertAtCursor(answerBox.current, text, s);
+                setText(r.value);
+                requestAnimationFrame(() => {
+                  answerBox.current?.focus();
+                  answerBox.current?.setSelectionRange(r.caret, r.caret);
+                });
+              }}
+            />
+            <PhotoButton context={q.prompt} onText={(t) => setText((cur) => (cur.trim() ? `${cur.trimEnd()}\n\n${t}` : t))} />
+          </div>
+          {(q.kind === "math" || q.kind === "free") && text.includes("$") && (
             <div className="rounded-md border border-dashed border-border-strong px-3 py-2">
               <div className="mb-1 text-xs text-muted">Как это выглядит</div>
               <Markdown text={text.replace(/\n/g, "  \n")} />

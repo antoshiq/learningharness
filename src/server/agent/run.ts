@@ -4,15 +4,17 @@
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "../db";
 import type { Db } from "../db";
-import { getRoles } from "../config";
+import { getRoles, getTheoryDepth } from "../config";
 import { chatAs } from "../llm";
 import { isToolUse, type Block, type ChatMsg, type ToolResultBlock } from "../llm/types";
 import { applyAttempt } from "../mastery";
+import { captureTheory } from "../theory";
+import { takeFeedback } from "../feedback";
 import { gradeAuto, normalizeOutput } from "@/lib/grading";
 import type { AnswerPayload, Outcome, Question, StreamEvent, TurnInput } from "@/lib/types";
 import { systemPrompt } from "./prompts";
 import { initialState, planStateText, STATE_PREFIX, SYSTEM_PREFIX } from "./state";
-import { executeTool, semesterBookIds, toolDefs } from "./tools";
+import { executeToolAsync, semesterBookIds, toolDefs } from "./tools";
 import { runClaudeCodeTurn } from "./claude-code";
 import type { PendingState } from "../db/schema";
 
@@ -128,6 +130,7 @@ function appendInput(db: Db, sessionId: number, input: TurnInput, emit: (e: Stre
         .where(eq(schema.attempts.id, attempt.id))
         .run();
       invalidStreak.delete(sessionId);
+      captureTheory(db, attempt, messages);
       let text = answerResultText(attempt.id, attempt.question, a, auto);
       if (auto) {
         emit({ type: "graded", attemptId: attempt.id, outcome: auto });
@@ -166,11 +169,26 @@ function appendInput(db: Db, sessionId: number, input: TurnInput, emit: (e: Stre
       break;
     }
 
+    case "continue":
+      if (pending) throw new TurnError("Сначала ответь на вопрос", 409);
+      content = [{ type: "text", text: `${SYSTEM_PREFIX} Дальше` }];
+      break;
+
+    case "more":
+      if (pending) content = skipPending(db, pending, "Ученик не стал пока отвечать: он попросил объяснить подробнее (см. ниже). После объяснения задай этот вопрос снова.");
+      content.push({ type: "text", text: `${SYSTEM_PREFIX} Подробнее` });
+      content.push({ type: "text", text: "Объясни подробнее" });
+      break;
+
     case "finish":
       if (pending) content = skipPending(db, pending, "Ученик не ответил на вопрос: он завершает сессию.");
       content.push({ type: "text", text: `${SYSTEM_PREFIX} Ученик завершает сессию. Подведи итог: вызови end_session.` });
       break;
   }
+
+  // Marks the learner put on earlier steps travel with this action.
+  const marks = input.type === "start" ? null : takeFeedback(db, sessionId);
+  if (marks) content.push({ type: "text", text: marks });
 
   db.update(schema.sessions)
     .set({ messages: [...messages, { role: "user", content }], pending: null })
@@ -198,7 +216,7 @@ export async function runTurn(sessionId: number, input: TurnInput, emit: (e: Str
 
       let streamed = false;
       const result = await chatAs("strong", session.kind, sessionId, {
-        system: systemPrompt(session.kind, topic.kind),
+        system: systemPrompt(session.kind, topic.kind, getTheoryDepth()),
         messages: session.messages,
         tools: toolDefs(topic.kind, semesterBookIds(db, topic).length > 0),
         onText: (delta) => {
@@ -242,7 +260,8 @@ export async function runTurn(sessionId: number, input: TurnInput, emit: (e: Str
           emit({ type: "status", text: "Читаю репозиторий…" });
         }
         if (tu.name === "read_book" || tu.name === "search_book") emit({ type: "status", text: "Читаю учебник…" });
-        const out = executeTool(ctx, tu.name, tu.id, tu.input);
+        if (tu.name === "run_python") emit({ type: "status", text: "Проверяю вычисления…" });
+        const out = await executeToolAsync(ctx, tu.name, tu.id, tu.input);
         if (out.pendingAttemptId !== undefined) {
           pending = { toolUseId: tu.id, attemptId: out.pendingAttemptId };
           continue;

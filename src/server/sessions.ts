@@ -2,6 +2,8 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "./db";
 import { isRunning } from "./agent/run";
 import { dueNodes, isHiddenText, planView } from "./agent/state";
+import { sessionFeedback } from "./feedback";
+import type { StepFeedbackKind } from "./db/schema";
 import { semesterBookIds } from "./agent/tools";
 import { isText, isToolUse } from "./llm/types";
 import type { PlanNodeView, SessionSummary, TranscriptItem, UsageTotals } from "@/lib/types";
@@ -64,6 +66,8 @@ export interface SessionView {
   parkingOpen: number;
   /** Books of the semester a module topic belongs to: page references in the lesson open them. */
   books: { id: number; name: string; role: string }[];
+  /** The learner's marks on steps, by the step's first words. */
+  feedback: { excerpt: string; kind: StepFeedbackKind }[];
 }
 
 export function getSessionView(id: number): SessionView | null {
@@ -125,6 +129,7 @@ export function getSessionView(id: number): SessionView | null {
     needsRetry: !s.endedAt && !s.pending && !!last && last.role === "user" && !isRunning(id),
     running: isRunning(id),
     plan: planView(db, topic.id),
+    feedback: sessionFeedback(db, id),
     usage: usageTotals({ sessionId: id }),
     side: db
       .select({ role: schema.sideMessages.role, text: schema.sideMessages.text })

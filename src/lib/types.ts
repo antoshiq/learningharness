@@ -132,6 +132,10 @@ export type TurnInput =
   | { type: "answer"; attemptId: number; answer: AnswerPayload }
   | { type: "invalid_question"; attemptId: number; detail: string }
   | { type: "message"; text: string }
+  /** The learner has read a theory step and wants the next one. */
+  | { type: "continue" }
+  /** "Explain in more detail": the current idea, deeper (an open question is set aside and asked again). */
+  | { type: "more" }
   | { type: "finish" };
 
 export interface UsageTotals {
@@ -142,7 +146,7 @@ export interface UsageTotals {
   costKnown: boolean;
 }
 
-export type ProviderId = "anthropic" | "openrouter" | "custom" | "claude-code" | "codex" | "gemini-cli" | "mock";
+export type ProviderId = "anthropic" | "openrouter" | "custom" | "claude-code" | "codex" | "antigravity" | "copilot" | "mock";
 export interface RoleConfig {
   provider: ProviderId;
   model: string;
@@ -150,14 +154,19 @@ export interface RoleConfig {
 export interface AppConfig {
   roles: { strong: RoleConfig; cheap: RoleConfig };
   customBaseUrl: string;
-  has: { anthropic: boolean; openrouter: boolean; custom: boolean; customKey: boolean };
+  has: { anthropic: boolean; openrouter: boolean; custom: boolean; customKey: boolean; copilot: boolean };
   mockEnabled: boolean;
   /** Daily spending cap in USD, or null. */
   dailyLimit: number | null;
   spentToday: number;
   /** Answers per day the learner aims for. */
   dailyGoal: number;
+  /** How much theory the tutor gives on a new idea. */
+  theoryDepth: TheoryDepth;
 }
+
+export type TheoryDepth = "brief" | "balanced" | "detailed";
+export const THEORY_DEPTHS: TheoryDepth[] = ["brief", "balanced", "detailed"];
 
 export const MISCONCEPTION_TYPES = [
   "пробел в предпосылке",

@@ -6,6 +6,58 @@ import { Calibration, CostBars, GoalRing, Heatmap } from "@/components/Charts";
 import { Card, cx, Icon, Loading, Notice, Page, PanelTitle, StatusItem, TopNav, type IconName } from "@/components/ui";
 import { api, formatCost, plural } from "@/lib/api";
 import type { Stats } from "@/lib/types";
+import { FEEDBACK_KINDS, FEEDBACK_LABEL, type StepFeedbackKind } from "@/lib/feedback";
+
+interface FeedbackItem {
+  id: number;
+  kind: StepFeedbackKind;
+  excerpt: string;
+  comment: string | null;
+  sessionId: number;
+  topicTitle: string | null;
+  createdAt: number;
+}
+
+/** Where lessons explained badly, by the learner's own marks: material for improving the prompts. */
+function FeedbackLog() {
+  const [log, setLog] = useState<{ counts: Record<StepFeedbackKind, number>; items: FeedbackItem[] } | null>(null);
+  useEffect(() => {
+    api<typeof log>("/api/feedback")
+      .then(setLog)
+      .catch(() => setLog(null));
+  }, []);
+  if (!log || !log.items.length) return null;
+  return (
+    <Card>
+      <h2 className="text-[15px] font-semibold text-bright">Отметки на шагах уроков</h2>
+      <p className="mt-1 mb-3 text-sm text-muted">Что ты отмечал в уроках. Репетитор видит отметку сразу, а здесь видно, где объяснения чаще всего не получаются.</p>
+      <dl className="mb-4 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+        {FEEDBACK_KINDS.map((k) => (
+          <div key={k} className="flex gap-1.5">
+            <dt className="text-muted">{FEEDBACK_LABEL[k]}</dt>
+            <dd className="font-medium text-bright tabular-nums">{log.counts[k]}</dd>
+          </div>
+        ))}
+      </dl>
+      <ul className="divide-y divide-border">
+        {log.items.map((f) => (
+          <li key={f.id} className="py-2 text-sm">
+            <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted">
+              <span className={cx("font-medium", f.kind === "wrong" ? "text-bad" : "text-warn")}>{FEEDBACK_LABEL[f.kind]}</span>
+              {f.topicTitle && <span>{f.topicTitle}</span>}
+              <span>{new Date(f.createdAt).toLocaleDateString("ru-RU")}</span>
+              <Link href={`/session/${f.sessionId}`} className="ml-auto text-accent hover:underline">
+                к уроку
+              </Link>
+            </div>
+            <p className="mt-0.5 line-clamp-2 text-text">{f.excerpt}…</p>
+            {f.comment && <p className="mt-0.5 text-muted">«{f.comment}»</p>}
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
 
 function Tile({ icon, label, value, sub, tone, i }: { icon: IconName; label: string; value: string; sub?: string; tone?: string; i: number }) {
   return (
@@ -163,6 +215,8 @@ export default function StatsPage() {
               <CostBars days={s.cost.days} limit={s.cost.limit} />
               {!s.cost.known && <p className="mt-3 text-xs text-muted">Часть вызовов без известной цены (подписка Claude или свой сервер): они показаны серыми столбиками и в суммы не входят.</p>}
             </Card>
+
+            <FeedbackLog />
           </div>
         )}
       </Page>

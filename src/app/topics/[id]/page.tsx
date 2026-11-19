@@ -8,6 +8,7 @@ import { CardsTab } from "@/components/CardsTab";
 import { MaterialsTab, type Material } from "@/components/MaterialsTab";
 import { PlanGraph } from "@/components/PlanGraph";
 import { StartSession } from "@/components/StartSession";
+import { TheoryTab } from "@/components/TheoryTab";
 import { Badge, Button, Card, Cells, Count, cx, Icon, inputClass, LinkButton, Loading, Notice, Page, Sheet, StatusItem, TopNav } from "@/components/ui";
 import { notifyChanged } from "@/components/workbench-context";
 import { api, formatCost, formatDate, formatTokens, streamPost } from "@/lib/api";
@@ -47,8 +48,8 @@ interface Detail {
 
 const KIND = { lesson: "Урок", practice: "Практика", review: "Повторение" } as const;
 const CONF = ["Угадывал", "Скорее да", "Уверен"];
-type Tab = "map" | "materials" | "notes" | "cards" | "mistakes" | "parking" | "sessions" | "repo";
-const TABS: Tab[] = ["map", "materials", "notes", "cards", "mistakes", "parking", "sessions", "repo"];
+type Tab = "map" | "theory" | "materials" | "notes" | "cards" | "mistakes" | "parking" | "sessions" | "repo";
+const TABS: Tab[] = ["map", "theory", "materials", "notes", "cards", "mistakes", "parking", "sessions", "repo"];
 
 /** The cheat sheet: written by the tutor on request from everything learned so far. */
 function Notes({ topic, onSaved }: { topic: Detail["topic"]; onSaved: () => Promise<void> }) {
@@ -242,6 +243,7 @@ export default function TopicPage() {
   const [d, setD] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("map");
+  const [theoryFocus, setTheoryFocus] = useState<string | null>(null);
   const [start, setStart] = useState<"lesson" | "practice" | "review" | null>(null);
   const [parked, setParked] = useState<{ id: number; text: string } | null>(null);
   const [lessonGoal, setLessonGoal] = useState("");
@@ -262,6 +264,8 @@ export default function TopicPage() {
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab") as Tab | null;
     if (t && TABS.includes(t)) setTab(t);
+    const node = new URLSearchParams(window.location.search).get("node");
+    if (t === "theory" && node) setTheoryFocus(node);
   }, []);
   // From the study plan: ?start=lesson[&node=key] opens the lesson dialog with that idea as the goal.
   const planned = useRef(false);
@@ -305,6 +309,7 @@ export default function TopicPage() {
   const parkedOpen = d.parking.filter((p) => !p.done).length;
   const tabs: [Tab, string, number][] = [
     ["map", "Карта", 0],
+    ["theory", "Теория", 0],
     ["materials", "Материалы", d.materials.length],
     ["notes", "Конспект", 0],
     ["cards", "Карточки", 0],
@@ -462,7 +467,17 @@ export default function TopicPage() {
         </div>
 
         <div key={tab} className="enter mt-4">
-          {tab === "map" && <PlanGraph plan={d.plan} />}
+          {tab === "map" && (
+            <PlanGraph
+              plan={d.plan}
+              onTheory={(key) => {
+                setTheoryFocus(key);
+                setTab("theory");
+              }}
+            />
+          )}
+
+          {tab === "theory" && <TheoryTab topicId={d.topic.id} focus={theoryFocus} />}
 
           {tab === "materials" && <MaterialsTab topicId={d.topic.id} files={d.materials} onChanged={load} />}
 

@@ -10,6 +10,7 @@ import { MISCONCEPTION_TYPES, type Question, type SessionSummary } from "@/lib/t
 import { listDir, readFile, searchCode } from "../repo/tools";
 import { MAX_READ_PAGES, readBookPages, searchBooks } from "../book-read";
 import { planStateText } from "./state";
+import { runPython } from "../python";
 
 type Session = typeof schema.sessions.$inferSelect;
 type Topic = typeof schema.topics.$inferSelect;
@@ -112,6 +113,10 @@ const SearchCode = z.object({
   regex: z.boolean().optional().describe("true — query это регулярное выражение; иначе точный текст"),
 });
 
+const RunPython = z.object({
+  code: z.string().min(1).describe("программа на Python; результат выводи через print()"),
+});
+
 const ReadBook = z.object({
   book_id: z.number().int().describe("id книги (число из bN в списке книг)"),
   page_from: z.number().int(),
@@ -146,6 +151,12 @@ const SPECS: Spec[] = [
   },
   { name: "set_plan", description: "Создать или перестроить план обучения — граф узлов с зависимостями. Передавай план целиком.", schema: SetPlan },
   { name: "end_session", description: "Завершить сессию и показать ученику итог.", schema: EndSession },
+  {
+    name: "run_python",
+    description:
+      "Посчитать на Python для себя: ученик не видит ни код, ни вывод. Доступны sympy (символьные вычисления: пределы, производные, интегралы, ряды, уравнения, упрощение), numpy, fractions, math. Проверяй так выкладки разобранных примеров, эталоны вопросов math и choice, числовые ответы — до того как показать их ученику. До 20 секунд на запуск.",
+    schema: RunPython,
+  },
   { name: "list_dir", description: "Показать содержимое папки репозитория.", schema: ListDir, repoOnly: true },
   { name: "read_file", description: "Прочитать файл репозитория с номерами строк.", schema: ReadFile, repoOnly: true },
   { name: "search_code", description: "Найти текст в файлах репозитория.", schema: SearchCode, repoOnly: true },
@@ -182,6 +193,15 @@ function parse<T>(s: z.ZodType<T>, input: unknown): { ok: true; data: T } | { ok
       "Некорректные аргументы: " +
       r.error.issues.map((i) => `${i.path.length ? i.path.join(".") + ": " : ""}${i.message}`).join("; "),
   };
+}
+
+/** executeTool plus the tools that take time (Python). */
+export async function executeToolAsync(ctx: ToolCtx, name: string, toolUseId: string, input: unknown): Promise<ToolOutcome> {
+  if (name !== "run_python") return executeTool(ctx, name, toolUseId, input);
+  const p = parse(RunPython, input);
+  if (!p.ok) return { content: p.error, isError: true };
+  const r = await runPython(p.data.code);
+  return { content: r.text, isError: !r.ok };
 }
 
 export function executeTool(ctx: ToolCtx, name: string, toolUseId: string, input: unknown): ToolOutcome {

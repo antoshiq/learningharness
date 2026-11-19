@@ -1,6 +1,7 @@
 import { sqliteTable, text, integer, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 import type { ChatMsg } from "../llm/types";
 import type { Question, AnswerPayload, SessionSummary, FsrsCardJson } from "@/lib/types";
+import type { StepFeedbackKind } from "@/lib/feedback";
 
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
@@ -502,4 +503,38 @@ export const oralExams = sqliteTable(
     finishedAt: integer("finished_at"),
   },
   (t) => [index("oral_exams_topic").on(t.topicId)],
+);
+
+/** Theory the tutor gave on one idea of a plan: kept so it can be reread outside the lesson. */
+export const theory = sqliteTable(
+  "theory",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    topicId: integer("topic_id").notNull(),
+    nodeKey: text("node_key").notNull(),
+    sessionId: integer("session_id"),
+    text: text("text").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [index("theory_topic_node").on(t.topicId, t.nodeKey)],
+);
+
+export type { StepFeedbackKind };
+
+/** The learner's mark on one step of a lesson: shown to the tutor on the next turn and kept as a log. */
+export const stepFeedback = sqliteTable(
+  "step_feedback",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    sessionId: integer("session_id").notNull(),
+    topicId: integer("topic_id"),
+    kind: text("kind").$type<StepFeedbackKind>().notNull(),
+    /** The start of the step it is about. */
+    excerpt: text("excerpt").notNull(),
+    comment: text("comment"),
+    /** Already passed to the tutor. */
+    delivered: integer("delivered", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [index("step_feedback_session").on(t.sessionId)],
 );

@@ -146,4 +146,38 @@ describe("lesson flow", () => {
     expect(sessions.createSession({ topicId: topic.id, kind: "review" })).toBeGreaterThan(0);
     expect(sessions.listTopics().find((t) => t.id === topic.id)).toMatchObject({ total: 3, mastered: 3, due: 3 });
   });
+
+  it("theory steps: «Объясни подробнее» sets an open question aside, «Дальше» continues", async () => {
+    const db = dbmod.getDb();
+    const now = Date.now();
+    const topic = db
+      .insert(dbmod.schema.topics)
+      .values({ title: "Теория", goal: "проверка", kind: "topic", createdAt: now, updatedAt: now })
+      .returning()
+      .get();
+    const id = sessions.createSession({ topicId: topic.id, kind: "lesson" });
+    await turn(id, { type: "start" });
+    let view = sessions.getSessionView(id)!;
+    const probe = view.transcript.at(-1)!;
+    if (probe.type !== "question") throw new Error("expected a question");
+
+    // With a question open, "Дальше" is refused: the learner must answer or ask for more.
+    await expect(turn(id, { type: "continue" })).rejects.toThrow(/ответь/);
+
+    await turn(id, { type: "more" });
+    view = sessions.getSessionView(id)!;
+    expect(view.pendingAttemptId).toBeNull();
+    const asked = view.transcript.find((t) => t.type === "question" && t.attemptId === probe.attemptId);
+    expect(asked).toMatchObject({ outcome: "skipped" });
+    expect(view.transcript.at(-2)).toEqual({ type: "user", text: "Объясни подробнее" });
+    expect(view.transcript.at(-1)).toMatchObject({ type: "assistant", text: expect.stringContaining("Подробное объяснение") });
+    expect(view.needsRetry).toBe(false);
+
+    // "Дальше" leaves no visible message of its own; the tutor goes on.
+    const before = view.transcript.length;
+    await turn(id, { type: "continue" });
+    view = sessions.getSessionView(id)!;
+    expect(view.transcript.slice(before).some((t) => t.type === "user")).toBe(false);
+    expect(view.transcript.length).toBeGreaterThan(before);
+  });
 });

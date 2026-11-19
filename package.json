@@ -33,6 +33,7 @@
         "drizzle-orm": "^0.45.4",
         "ignore": "^7.0.14",
         "katex": "^0.19.1",
+        "mathlive": "0.111.4",
         "mermaid": "^11.12.1",
         "nanoid": "^6.0.2",
         "next": "16.4.6",

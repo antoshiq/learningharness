@@ -1,9 +1,10 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Markdown } from "@/components/Markdown";
 import { PhotoButton } from "@/components/PhotoButton";
+import { FormulaButton, insertAtCursor } from "@/components/FormulaButton";
 import { Badge, Button, Card, cx, Dots, Icon, inputClass, LinkButton, Loading, Notice, Page, Segmented, TopNav } from "@/components/ui";
 import { api } from "@/lib/api";
 import { gradeOf } from "@/lib/semester";
@@ -76,6 +77,7 @@ export default function HomeworkPage() {
   const { id, hid } = useParams<{ id: string; hid: string }>();
   const [h, setH] = useState<View | null>(null);
   const [answer, setAnswer] = useState("");
+  const answerBox = useRef<HTMLTextAreaElement>(null);
   const [mode, setMode] = useState<"write" | "preview">("write");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -226,6 +228,7 @@ export default function HomeworkPage() {
                 </div>
                 {mode === "write" ? (
                   <textarea
+                    ref={answerBox}
                     className={cx(inputClass, "min-h-72 resize-y font-mono text-[14px]")}
                     value={answer}
                     onChange={(e) => edit(e.target.value)}
@@ -234,7 +237,19 @@ export default function HomeworkPage() {
                 ) : (
                   <div className="min-h-72 rounded-sm border border-border px-3 py-2">{answer.trim() ? <Markdown text={answer} /> : <p className="text-sm text-muted">Пока пусто.</p>}</div>
                 )}
-                <PhotoButton context={h.task} onText={(t) => edit(answer.trim() ? `${answer.trimEnd()}\n\n${t}` : t)} />
+                <div className="flex flex-wrap items-start gap-2">
+                  <FormulaButton
+                    onInsert={(s) => {
+                      const r = insertAtCursor(mode === "write" ? answerBox.current : null, answer, s);
+                      edit(r.value);
+                      requestAnimationFrame(() => {
+                        answerBox.current?.focus();
+                        answerBox.current?.setSelectionRange(r.caret, r.caret);
+                      });
+                    }}
+                  />
+                  <PhotoButton context={h.task} onText={(t) => edit(answer.trim() ? `${answer.trimEnd()}\n\n${t}` : t)} />
+                </div>
                 <div className="flex flex-wrap items-center gap-3">
                   <Button variant="primary" onClick={submit} disabled={busy || answer.trim().length < 20}>
                     {busy ? (

@@ -11,6 +11,7 @@ import { Button, Count, cx, Dots, Icon, inputClass, LinkButton, Loading, Notice,
 import { notifyChanged } from "@/components/workbench-context";
 import { api, formatCost, formatTokens, streamPost } from "@/lib/api";
 import type { AnswerPayload, TranscriptItem, TurnInput } from "@/lib/types";
+import { excerptOf, type StepFeedbackKind } from "@/lib/feedback";
 import type { SessionView } from "@/server/sessions";
 
 const KIND = { lesson: "Урок", practice: "Практика", review: "Повторение" } as const;
@@ -37,6 +38,40 @@ function Prose({ text, books, onBook, className }: { text: string; books: LinkBo
   );
 }
 
+const MARKS: { kind: StepFeedbackKind; label: string; title: string }[] = [
+  { kind: "unclear", label: "Непонятно", title: "Репетитор объяснит это место иначе" },
+  { kind: "too_long", label: "Длинно", title: "Репетитор будет объяснять короче" },
+  { kind: "wrong", label: "Ошибка", title: "В объяснении ошибка: репетитор перепроверит и исправит" },
+];
+
+/** Quiet marks under a step; the tutor reads them with the next action. */
+function StepMarks({ text, marked, onMark }: { text: string; marked: Set<string>; onMark: (kind: StepFeedbackKind, text: string) => void }) {
+  const ex = excerptOf(text);
+  const any = MARKS.some((m) => marked.has(`${m.kind}:${ex}`));
+  return (
+    <div className={cx("-mt-3 flex items-center gap-1 transition-opacity", any ? "opacity-100" : "opacity-40 hover:opacity-100 focus-within:opacity-100")}>
+      {MARKS.map((m) => {
+        const on = marked.has(`${m.kind}:${ex}`);
+        return (
+          <button
+            key={m.kind}
+            type="button"
+            onClick={() => onMark(m.kind, text)}
+            title={on ? "Отметка стоит. Нажми ещё раз, чтобы убрать" : m.title}
+            aria-pressed={on}
+            className={cx(
+              "rounded-sm px-1.5 py-0.5 text-xs",
+              on ? (m.kind === "wrong" ? "bg-bad-soft text-bad" : "bg-warn-soft text-warn") : "text-muted hover:bg-surface-2 hover:text-bright",
+            )}
+          >
+            {m.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function Item({
   item,
   busy,
@@ -44,6 +79,8 @@ function Item({
   onInvalid,
   books,
   onBook,
+  marked,
+  onMark,
 }: {
   item: TranscriptItem;
   busy: boolean;
@@ -51,8 +88,17 @@ function Item({
   onInvalid: (id: number, d: string) => void;
   books: LinkBook[];
   onBook: (book: number, page: number) => void;
+  marked: Set<string>;
+  onMark: (kind: StepFeedbackKind, text: string) => void;
 }) {
-  if (item.type === "assistant") return <Prose text={item.text} className="prose-lesson" books={books} onBook={onBook} />;
+  if (item.type === "assistant") {
+    return (
+      <>
+        <Prose text={item.text} className="prose-lesson" books={books} onBook={onBook} />
+        <StepMarks text={item.text} marked={marked} onMark={onMark} />
+      </>
+    );
+  }
   if (item.type === "user") return <Said>{item.text}</Said>;
   if (item.type === "event") {
     return (
@@ -63,7 +109,12 @@ function Item({
       </div>
     );
   }
-  return <QuestionCard item={item} busy={busy} onAnswer={onAnswer} onInvalid={onInvalid} />;
+  return (
+    <>
+      <QuestionCard item={item} busy={busy} onAnswer={onAnswer} onInvalid={onInvalid} />
+      <StepMarks text={item.question.prompt} marked={marked} onMark={onMark} />
+    </>
+  );
 }
 
 /** The learner's own words, set against the right edge like a chat request. */
@@ -314,6 +365,8 @@ export default function SessionPage() {
   const waiting = busy || view.running;
   const ended = !!view.endedAt;
   const overtime = view.plannedMinutes !== null && !ended && now - view.startedAt > view.plannedMinutes * 60_000;
+  // The tutor stopped without a question: a theory step to read, then "Дальше".
+  const canContinue = !waiting && !ended && !view.pendingAttemptId && !view.needsRetry && items.length > 0;
 
   const spent =
     view.usage.cost !== null && (view.usage.cost > 0 || view.usage.costKnown)
@@ -324,6 +377,17 @@ export default function SessionPage() {
   const right = graded.filter((o) => o === "correct").length;
   const wrong = graded.filter((o) => o === "wrong" || o === "partial").length;
 
+  const marked = new Set(view.feedback.map((f) => `${f.kind}:${f.excerpt}`));
+  const onMark = async (kind: StepFeedbackKind, text: string) => {
+    const comment = kind === "wrong" && !marked.has(`${kind}:${excerptOf(text)}`) ? (window.prompt("Что не так? (можно оставить пустым)") ?? null) : "";
+    if (comment === null) return;
+    try {
+      const r = await api<{ feedback: SessionView["feedback"] }>(`/api/sessions/${id}/feedback`, { body: { kind, text, comment } });
+      setView((v) => (v ? { ...v, feedback: r.feedback } : v));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
   const onAnswer = (attemptId: number, answer: AnswerPayload) => send({ type: "answer", attemptId, answer });
   const onInvalid = (attemptId: number, detail: string) => send({ type: "invalid_question", attemptId, detail });
   const sendMessage = () => {
@@ -387,13 +451,24 @@ export default function SessionPage() {
         )}
 
         {shown.map((it, i) => (
-          <Item key={it.type === "question" ? `q${it.attemptId}` : `${(showHistory ? 0 : boundary) + i}-${it.type}`} item={it} busy={waiting} onAnswer={onAnswer} onInvalid={onInvalid} books={view.books} onBook={openBook} />
+          <Item key={it.type === "question" ? `q${it.attemptId}` : `${(showHistory ? 0 : boundary) + i}-${it.type}`} item={it} busy={waiting} onAnswer={onAnswer} onInvalid={onInvalid} books={view.books} onBook={openBook} marked={marked} onMark={onMark} />
         ))}
 
         {streaming && <Prose text={streaming} className="prose-lesson streaming" books={view.books} onBook={openBook} />}
         {waiting && (
           <div className="appear flex items-center gap-2.5 text-sm text-muted" aria-live="polite">
             <Dots /> {status || (streaming ? "" : "Репетитор работает…")}
+          </div>
+        )}
+
+        {canContinue && (
+          <div className="enter flex flex-wrap items-center gap-2">
+            <Button variant="primary" autoFocus onClick={() => send({ type: "continue" })}>
+              Дальше
+            </Button>
+            <Button variant="ghost" onClick={() => send({ type: "more" })} title="Разобрать эту идею глубже, с другой стороны">
+              Объясни подробнее
+            </Button>
           </div>
         )}
 
@@ -478,6 +553,18 @@ export default function SessionPage() {
                 Вопрос<span className="hidden sm:inline"> по шагу</span>
               </span>
             </Button>
+            {view.pendingAttemptId !== null && (
+              <Button
+                small
+                variant="ghost"
+                className="shrink-0 px-2.5 whitespace-nowrap"
+                onClick={() => send({ type: "more" })}
+                disabled={waiting}
+                title="Сначала разобрать идею подробнее, потом ответить: вопрос вернётся"
+              >
+                Подробнее
+              </Button>
+            )}
             <Button small variant="ghost" className="shrink-0 px-2.5 whitespace-nowrap" onClick={() => setSheet("parking")}>
               Парковка
               {view.parkingOpen > 0 && <Count n={view.parkingOpen} />}

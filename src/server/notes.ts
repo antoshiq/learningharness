@@ -4,6 +4,7 @@ import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { getDb, schema } from "./db";
 import { planView } from "./agent/state";
 import { materialsText } from "./materials";
+import { theoryForNotes } from "./theory";
 
 const MAX_CONTEXT = 40_000;
 
@@ -26,6 +27,8 @@ export function notesContext(topicId: number): string {
   if (topic.repoMap) out.push("", "Карта проекта:", topic.repoMap.slice(0, 6000));
   const materials = materialsText(topicId, 15_000);
   if (materials) out.push("", "Материалы ученика (основа темы):", materials);
+  const theory = theoryForNotes(db, topicId);
+  if (theory) out.push("", "Теория, которую репетитор объяснял на уроках, по идеям (опирайся на неё, сохраняя формулировки и примеры, которые ученик уже видел):", theory);
 
   const summaries = db
     .select({ summary: schema.sessions.summary })
