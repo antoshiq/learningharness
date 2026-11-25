@@ -45,6 +45,7 @@ next-env.d.ts
 /data/
 
 /public/pyodide/
+/public/pglite/
 
 
 # playwright

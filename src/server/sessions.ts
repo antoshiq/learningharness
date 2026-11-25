@@ -1,10 +1,13 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "./db";
+import { getTheoryDepth } from "./config";
+import { measureSessionContext, type SessionContextInfo } from "./agent/context";
+import { systemPrompt } from "./agent/prompts";
 import { isRunning } from "./agent/run";
 import { dueNodes, isHiddenText, planView } from "./agent/state";
 import { sessionFeedback } from "./feedback";
 import type { StepFeedbackKind } from "./db/schema";
-import { semesterBookIds } from "./agent/tools";
+import { semesterBookIds, toolDefs } from "./agent/tools";
 import { isText, isToolUse } from "./llm/types";
 import type { PlanNodeView, SessionSummary, TranscriptItem, UsageTotals } from "@/lib/types";
 
@@ -68,6 +71,8 @@ export interface SessionView {
   books: { id: number; name: string; role: string }[];
   /** The learner's marks on steps, by the step's first words. */
   feedback: { excerpt: string; kind: StepFeedbackKind }[];
+  /** Estimated size of the prompt sent to the model on the next step (after optimization). */
+  context: SessionContextInfo;
 }
 
 export function getSessionView(id: number): SessionView | null {
@@ -114,6 +119,13 @@ export function getSessionView(id: number): SessionView | null {
     }
   }
 
+  const bookIds = semesterBookIds(db, topic);
+  const context = measureSessionContext(
+    systemPrompt(s.kind, topic.kind, getTheoryDepth()),
+    s.messages,
+    toolDefs(topic.kind, bookIds.length > 0),
+  );
+
   const last = s.messages[s.messages.length - 1];
   return {
     id: s.id,
@@ -130,6 +142,7 @@ export function getSessionView(id: number): SessionView | null {
     running: isRunning(id),
     plan: planView(db, topic.id),
     feedback: sessionFeedback(db, id),
+    context,
     usage: usageTotals({ sessionId: id }),
     side: db
       .select({ role: schema.sideMessages.role, text: schema.sideMessages.text })
@@ -137,11 +150,11 @@ export function getSessionView(id: number): SessionView | null {
       .where(eq(schema.sideMessages.sessionId, id))
       .orderBy(schema.sideMessages.id)
       .all(),
-    books: semesterBookIds(db, topic).length
+    books: bookIds.length
       ? db
           .select({ id: schema.books.id, name: schema.books.name, role: schema.books.role })
           .from(schema.books)
-          .where(inArray(schema.books.id, semesterBookIds(db, topic)))
+          .where(inArray(schema.books.id, bookIds))
           .all()
       : [],
     parkingOpen: db

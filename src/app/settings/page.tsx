@@ -452,7 +452,10 @@ export default function SettingsPage() {
             <Card className="space-y-2">
               <h2 className="text-[15px] font-semibold text-bright">Доступ с телефона</h2>
               <p className="text-sm text-muted">
-                Запусти на компьютере <code className="rounded-sm bg-code px-1 py-px font-mono text-xs text-text">start-lan.cmd</code> вместо <code className="rounded-sm bg-code px-1 py-px font-mono text-xs text-text">start.cmd</code>. В
+                Запусти на компьютере <code className="rounded-sm bg-code px-1 py-px font-mono text-xs text-text">start-lan.sh</code> (или{" "}
+                <code className="rounded-sm bg-code px-1 py-px font-mono text-xs text-text">start-lan.cmd</code> на Windows) вместо{" "}
+                <code className="rounded-sm bg-code px-1 py-px font-mono text-xs text-text">start.sh</code> /{" "}
+                <code className="rounded-sm bg-code px-1 py-px font-mono text-xs text-text">start.cmd</code>. В
                 окне появится адрес вида <code className="rounded-sm bg-code px-1 py-px font-mono text-xs text-text">http://192.168.x.x:3000</code> и пароль. Телефон должен быть в той же сети Wi-Fi.
                 Компьютер при этом должен оставаться включённым.
               </p>

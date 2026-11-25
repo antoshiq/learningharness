@@ -3,6 +3,7 @@
 // the photo when it can see pictures (Claude, GPT and Gemini all can); when it
 // cannot, or the call fails, the photo is read by the local OCR instead, which
 // handles neat print well and handwriting poorly — the learner is told so.
+import { mockEnabled } from "./config";
 import { chatAs } from "./llm";
 import { isText, LlmError, type ImageBlock } from "./llm/types";
 import { ocrImage } from "./ocr";
@@ -80,4 +81,91 @@ export async function transcribePhotos(photos: Buffer[], context = "", opts: { f
     via: "ocr",
     note: `${reason ? `${reason} ` : ""}Текст распознан на сервере без модели: печатное он читает хорошо, рукопись и формулы — плохо. Проверь и поправь, особенно формулы. Для рукописных решений выбери в «Настройках» модель, которая видит изображения (Claude, GPT, Gemini).`,
   };
+}
+
+const DOC_SCAN_SYSTEM = `Ты переводишь страницы учебных материалов (методичек, конспектов, слайдов, фото доски) в аккуратный Markdown для последующего обучения.
+- Передай весь текст точно, сохраняя заголовки, нумерацию, списки и определения.
+- Все формулы записывай в LaTeX: $...$ в строке, $$...$$ отдельной строкой.
+- Таблицы оформляй как Markdown-таблицы (| ... | ... |).
+- Код оформляй в блоках \`\`\` с указанием языка.
+- Схемы, диаграммы (ER, блок-схемы, графы, UML, электрические схемы) и графики опиши структурно и точно: все узлы, подписи, стрелки/связи, оси и ключевые значения (если удобно — в виде краткого списка или Mermaid).
+- Без вступлений и мета-комментариев: только содержание.`;
+
+const DOC_FIGURE_SYSTEM = `Ты расшифровываешь иллюстрации, схемы, диаграммы, графики, формулы и таблицы-картинки из учебного документа (методички, презентации, лабы), чтобы репетитор мог полноценно опираться на них в уроке.
+- Если на картинке таблица — перепиши её целиком как Markdown-таблицу.
+- Если формулы или выкладки — перепиши в LaTeX ($...$ / $$...$$).
+- Если схема, ER-диаграмма, блок-схема, граф, архитектура или график — опиши все элементы, подписи, связи/стрелки, кардинальности, оси и ключевые точки.
+- Если фрагмент кода или скриншот консоли — перепиши точно в блок \`\`\`.
+- Если изображение чисто декоративное (логотип вуза, рамка, фоновый узор без учебной информации) — напиши ровно: [декоративное изображение].
+- Пиши по-русски, кратко и точно, без лишней воды.`;
+
+const DECORATIVE_RE = /\[декоративное изображение\]/i;
+
+/**
+ * Ask the configured vision-capable lesson model to transcribe scanned pages or
+ * describe embedded figures/diagrams/tables. Returns a map `label -> text`.
+ * Silently returns an empty map in mock mode or when the model cannot read images.
+ */
+export async function describeDocumentImages(
+  items: { label: string; buffer: Buffer }[],
+  mode: "scan" | "figure",
+  opts: { allowMock?: boolean; onProgress?: (done: number, total: number) => void } = {},
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!items.length || (!opts.allowMock && mockEnabled())) return out;
+
+  const valid: { label: string; image: ImageBlock }[] = [];
+  for (const it of items) {
+    if (it.buffer.length > MAX_PHOTO_BYTES) continue;
+    const type = photoType(it.buffer);
+    if (!type) continue;
+    valid.push({ label: it.label, image: { type: "image", source: { type: "base64", media_type: type, data: it.buffer.toString("base64") } } });
+  }
+  if (!valid.length) return out;
+
+  const system = mode === "scan" ? DOC_SCAN_SYSTEM : DOC_FIGURE_SYSTEM;
+  for (let i = 0; i < valid.length; i += MAX_PHOTOS) {
+    const batch = valid.slice(i, i + MAX_PHOTOS);
+    opts.onProgress?.(i, valid.length);
+    const instruction =
+      batch.length === 1
+        ? mode === "scan"
+          ? "Расшифруй эту страницу учебного материала полностью (текст, формулы в LaTeX, таблицы, схемы)."
+          : "Расшифруй эту иллюстрацию/схему/таблицу из учебного документа."
+        : `Даны ${batch.length} изображений по порядку. Для каждого выведи заголовок вида === IMG <номер> === (от 1 до ${batch.length}) и под ним расшифровку соответствующего изображения.`;
+
+    try {
+      const r = await chatAs("strong", "document-vision", null, {
+        system,
+        messages: [{ role: "user", content: [...batch.map((b) => b.image), { type: "text", text: instruction }] }],
+        maxTokens: 8000,
+      });
+      const text = r.content.filter(isText).map((b) => b.text).join("").trim();
+      if (!text || CANNOT_SEE.test(text.slice(0, 300))) continue;
+
+      if (batch.length === 1) {
+        if (!DECORATIVE_RE.test(text)) out.set(batch[0].label, text);
+        continue;
+      }
+
+      const re = /===\s*IMG\s+(\d+)\s*===/gi;
+      const matches = [...text.matchAll(re)];
+      if (!matches.length) {
+        if (!DECORATIVE_RE.test(text)) out.set(batch[0].label, text);
+        continue;
+      }
+      for (let m = 0; m < matches.length; m++) {
+        const idx = Number(matches[m][1]) - 1;
+        if (idx < 0 || idx >= batch.length) continue;
+        const start = (matches[m].index ?? 0) + matches[m][0].length;
+        const end = m + 1 < matches.length ? (matches[m + 1].index ?? text.length) : text.length;
+        const body = text.slice(start, end).trim();
+        if (body && !DECORATIVE_RE.test(body)) out.set(batch[idx].label, body);
+      }
+    } catch {
+      // Fall back gracefully: caller uses OCR for scans or keeps the text layer as-is.
+    }
+    opts.onProgress?.(Math.min(i + batch.length, valid.length), valid.length);
+  }
+  return out;
 }

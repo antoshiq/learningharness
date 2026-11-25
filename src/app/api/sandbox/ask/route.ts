@@ -5,7 +5,7 @@ import { isText, type ChatMsg } from "@/server/llm/types";
 const SANDBOX_SYSTEM = `Ты помогаешь ученику в песочнице кода: он экспериментирует и спрашивает про свою программу. Тебе дают файлы с номерами строк, вывод и ошибку последнего запуска.
 - Отвечай по-русски, в Markdown, коротко и по делу. Ссылайся на строки как \`файл:строка\`.
 - Объясняй причину, а не только исправление. Если просят исправить — покажи только изменённый фрагмент в блоке кода с языком, не переписывай всю программу без просьбы.
-- Код выполняется в браузере: Python через Pyodide (input() читает из поля «Ввод», графики matplotlib показываются картинками), JavaScript в изолированном воркере (console.log, require("./файл"), input()). Доступа к сети и файлам компьютера нет.`;
+- Код выполняется в браузере: Python через Pyodide (input() читает из поля «Ввод», графики matplotlib показываются картинками), JavaScript в изолированном воркере (console.log, require("./файл"), input()), SQL в PostgreSQL (PGlite WebAssembly; подключение других файлов через \\i файл.sql). Доступа к сети и файлам компьютера нет.`;
 
 const MAX_CODE = 40_000;
 
@@ -35,8 +35,9 @@ export const POST = (req: Request) =>
       left -= numbered.length;
       return `<файл имя="${String(f.name).slice(0, 100)}"${f.name === b.active ? " открыт" : ""}>\n${numbered}\n</файл>`;
     });
+    const langLabel = b.language === "javascript" ? "JavaScript" : b.language === "sql" ? "SQL (PostgreSQL)" : "Python";
     const context =
-      `Язык: ${b.language === "javascript" ? "JavaScript" : "Python"}\n\n${files.join("\n\n")}` +
+      `Язык: ${langLabel}\n\n${files.join("\n\n")}` +
       `\n\nВывод последнего запуска:\n${(b.output ?? "").slice(-6000) || "(пусто или не запускалось)"}` +
       (b.error ? `\n\nОшибка:\n${b.error.slice(-3000)}` : "");
     const messages: ChatMsg[] = [

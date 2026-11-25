@@ -2,31 +2,41 @@
 // chapter, code). Stored as text; the tutor teaches from them in every lesson.
 import { and, asc, eq } from "drizzle-orm";
 import { getDb, schema } from "./db";
+import { extractDocx, extractImageMaterial, extractIpynb, extractPptx, isDocxName, isImageName, isIpynbName, isPptxName, isZip } from "./documents";
 import { isPdf, pdfText } from "./extract";
 import { isSecretName } from "./repo/scan";
+import { photoType } from "./vision";
 import { isSubtitleFile, subtitlesToText } from "./youtube";
 
-/** A file picked in the browser; PDFs and other binary files come as base64. */
+/** A file picked in the browser; PDFs, Office files and images come as base64. */
 export interface Upload {
   name: string;
   content: string;
   base64?: boolean;
 }
 
-const MAX_TEXT = 300_000;
-const MAX_PDF = 30 * 1024 * 1024;
+const MAX_TEXT = 2_000_000;
+const MAX_BINARY = 50 * 1024 * 1024;
 /** All materials of one topic together, in characters. */
-const MAX_TOPIC_CHARS = 2_000_000;
+const MAX_TOPIC_CHARS = 5_000_000;
 /** How much of the materials a lesson sees; the rest is listed by name. */
-export const LESSON_BUDGET = 60_000;
+export const LESSON_BUDGET = 250_000;
 
-/** Text of an uploaded file; refuses secrets, binaries and oversized files. */
-export async function uploadText(u: Upload): Promise<{ name: string; content: string }> {
+export interface UploadOptions {
+  /** Skip vision model calls for embedded figures/scans (faster, text/OCR only). */
+  skipVision?: boolean;
+  onProgress?: (text: string) => void;
+}
+
+/** Text of an uploaded file; refuses secrets, unsupported binaries and oversized files. */
+export async function uploadText(u: Upload, opts: UploadOptions = {}): Promise<{ name: string; content: string }> {
   const name = u.name.replace(/[\\/]/g, "_").slice(0, 200) || "файл";
   if (isSecretName(name)) throw new Error(`${name} похож на файл с секретами и не отправляется модели.`);
+  const docOpts = { useVision: !opts.skipVision, onProgress: opts.onProgress };
   if (!u.base64) {
-    if (u.content.length > MAX_TEXT) throw new Error(`${name} слишком большой (больше 300 КБ текста).`);
+    if (u.content.length > MAX_TEXT) throw new Error(`${name} слишком большой (больше 2 МБ текста).`);
     if (u.content.includes("\u0000")) throw new Error(`${name} не текстовый файл.`);
+    if (isIpynbName(name)) return { name, content: extractIpynb(u.content) };
     // Subtitles of a lecture: keep the words and their times, drop the numbering and markup.
     if (isSubtitleFile(name)) {
       const text = subtitlesToText(u.content);
@@ -36,12 +46,17 @@ export async function uploadText(u: Upload): Promise<{ name: string; content: st
     return { name, content: u.content };
   }
   const buf = Buffer.from(u.content, "base64");
-  if (isPdf(buf)) {
-    if (buf.length > MAX_PDF) throw new Error(`${name} больше 30 МБ.`);
-    return { name, content: (await pdfText(buf)).text };
+  if (buf.length > MAX_BINARY) throw new Error(`${name} больше 50 МБ.`);
+  if (isPdf(buf)) return { name, content: (await pdfText(buf, docOpts)).text };
+  if (isDocxName(name) && isZip(buf)) return { name, content: await extractDocx(buf, docOpts) };
+  if (isPptxName(name) && isZip(buf)) return { name, content: await extractPptx(buf, docOpts) };
+  if (isImageName(name) || photoType(buf)) return { name, content: await extractImageMaterial(buf, name, docOpts) };
+  if (buf.length > MAX_TEXT || buf.subarray(0, 8000).includes(0)) {
+    throw new Error(`${name}: поддерживаются текст/код, PDF, Word (.docx), PowerPoint (.pptx), Jupyter (.ipynb) и изображения (PNG/JPG/WebP).`);
   }
-  if (buf.length > MAX_TEXT || buf.subarray(0, 8000).includes(0)) throw new Error(`${name} не текстовый файл и не PDF.`);
-  return { name, content: buf.toString("utf8") };
+  const text = buf.toString("utf8");
+  if (isIpynbName(name)) return { name, content: extractIpynb(text) };
+  return { name, content: text };
 }
 
 export function listMaterials(topicId: number) {
@@ -54,13 +69,18 @@ export function listMaterials(topicId: number) {
     .map(({ content, ...f }) => ({ ...f, chars: content.length }));
 }
 
-export async function addMaterials(topicId: number, uploads: Upload[]) {
+export async function addMaterials(topicId: number, uploads: Upload[], opts: UploadOptions = {}) {
   if (!uploads.length) throw new Error("Нет файлов");
   const files = [];
-  for (const u of uploads) files.push(await uploadText(u));
+  for (let i = 0; i < uploads.length; i++) {
+    const u = uploads[i];
+    const prefix = uploads.length > 1 ? `[${i + 1}/${uploads.length}] ${u.name}: ` : `${u.name}: `;
+    opts.onProgress?.(`${prefix}обрабатываю…`);
+    files.push(await uploadText(u, { skipVision: opts.skipVision, onProgress: (msg) => opts.onProgress?.(`${prefix}${msg}`) }));
+  }
   const db = getDb();
   const have = listMaterials(topicId).reduce((n, f) => n + f.chars, 0);
-  if (have + files.reduce((n, f) => n + f.content.length, 0) > MAX_TOPIC_CHARS) throw new Error("Материалов слишком много для одной темы (больше 2 млн символов)");
+  if (have + files.reduce((n, f) => n + f.content.length, 0) > MAX_TOPIC_CHARS) throw new Error("Материалов слишком много для одной темы (больше 5 млн символов)");
   const now = Date.now();
   db.insert(schema.topicFiles)
     .values(files.map((f) => ({ topicId, name: f.name, content: f.content.replace(/\r\n?/g, "\n"), createdAt: now })))

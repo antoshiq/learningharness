@@ -7,9 +7,9 @@ import { GoalRing } from "@/components/Charts";
 import { PlanTasks } from "@/components/PlanTasks";
 import { FilePicker, type PickedFile } from "@/components/FilePicker";
 import { StartSession } from "@/components/StartSession";
-import { Button, Card, Cells, Count, cx, Field, Icon, inputClass, LinkButton, Loading, Notice, PanelTitle, Segmented, Sheet, StatusItem, TopNav } from "@/components/ui";
+import { Button, Card, Cells, Count, cx, Dots, Field, Icon, inputClass, LinkButton, Loading, Notice, PanelTitle, Segmented, Sheet, StatusItem, TopNav } from "@/components/ui";
 import { NEW_TOPIC_EVENT, notifyChanged, useWorkbench } from "@/components/workbench-context";
-import { api, daysWord, formatAgo, formatCost, formatTokens, plural } from "@/lib/api";
+import { api, daysWord, formatAgo, formatCost, formatTokens, plural, streamPost } from "@/lib/api";
 import type { Stats } from "@/lib/types";
 import type { PlanView } from "@/server/studyplan";
 import type { SemesterBrief } from "@/server/semester";
@@ -34,18 +34,22 @@ function NewTopic({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [goal, setGoal] = useState("");
   const [repoPath, setRepoPath] = useState("");
   const [files, setFiles] = useState<PickedFile[]>([]);
+  const [skipVision, setSkipVision] = useState(false);
   const [scan, setScan] = useState<Scan | null>(null);
   const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const guard = async (fn: () => Promise<void>) => {
     setBusy(true);
     setError(null);
+    setStatus(null);
     try {
       await fn();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      setStatus(null);
       setBusy(false);
     }
   };
@@ -53,6 +57,17 @@ function NewTopic({ open, onClose }: { open: boolean; onClose: () => void }) {
   const create = () =>
     guard(async () => {
       const uploads = kind === "topic" ? files.map(({ name, content, base64 }) => ({ name, content, base64 })) : [];
+      if (uploads.length) {
+        setStatus("Обрабатываю файлы…");
+        let createdId: number | null = null;
+        await streamPost("/api/topics", { kind, title, goal, repoPath, uploads, skipVision, stream: true }, (e) => {
+          if (e.type === "status") setStatus(e.text);
+          else if (e.type === "saved") createdId = e.id;
+          else if (e.type === "error") throw new Error(e.message);
+        });
+        if (createdId !== null) router.push(`/topics/${createdId}`);
+        return;
+      }
       const { id } = await api<{ id: number }>("/api/topics", { body: { kind, title, goal, repoPath, uploads } });
       router.push(`/topics/${id}`);
     });
@@ -82,7 +97,7 @@ function NewTopic({ open, onClose }: { open: boolean; onClose: () => void }) {
             </Field>
             <div>
               <div className="mb-1 text-[13px] text-bright">Материалы (необязательно)</div>
-              <FilePicker files={files} onChange={setFiles} />
+              <FilePicker files={files} onChange={setFiles} skipVision={skipVision} onSkipVision={setSkipVision} />
               <p className="mt-1.5 text-xs text-muted">
                 {files.length
                   ? "Репетитор будет учить по этим файлам: план, объяснения и вопросы — по их содержанию. Тему можно не называть, возьмётся имя файла."
@@ -100,7 +115,7 @@ function NewTopic({ open, onClose }: { open: boolean; onClose: () => void }) {
                   setRepoPath(e.target.value);
                   setScan(null);
                 }}
-                placeholder="C:\Users\...\my-project или https://github.com/owner/repo"
+                placeholder="~/projects/my-project или https://github.com/owner/repo"
                 spellCheck={false}
                 autoCapitalize="off"
                 autoCorrect="off"
@@ -138,6 +153,11 @@ function NewTopic({ open, onClose }: { open: boolean; onClose: () => void }) {
           </>
         )}
 
+        {busy && status && (
+          <div className="flex items-center gap-2 text-sm text-muted" aria-live="polite">
+            <Dots /> {status}
+          </div>
+        )}
         {error && <Notice tone="bad">{error}</Notice>}
         <div className="flex gap-2">
           {kind === "repo" && !scan && (

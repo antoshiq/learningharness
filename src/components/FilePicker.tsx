@@ -11,8 +11,11 @@ export interface PickedFile {
   size: number;
 }
 
-const MAX_TEXT = 300_000;
-const MAX_PDF = 30 * 1024 * 1024;
+const MAX_TEXT = 2_000_000;
+const MAX_DOC = 50 * 1024 * 1024;
+const MAX_IMAGE = 10 * 1024 * 1024;
+const BINARY_DOC = /\.(pdf|docx|pptx)$/i;
+const IMAGE_FILE = /\.(png|jpe?g|webp)$/i;
 
 function toBase64(buf: ArrayBuffer): string {
   const bytes = new Uint8Array(buf);
@@ -28,27 +31,45 @@ export async function readFiles(list: FileList | File[]): Promise<{ files: Picke
   const files: PickedFile[] = [];
   const skipped: string[] = [];
   for (const f of Array.from(list)) {
-    if (/\.pdf$/i.test(f.name) || f.type === "application/pdf") {
-      if (f.size > MAX_PDF) skipped.push(`${f.name} (больше 30 МБ)`);
+    if (BINARY_DOC.test(f.name) || f.type === "application/pdf") {
+      if (f.size > MAX_DOC) skipped.push(`${f.name} (больше 50 МБ)`);
+      else files.push({ name: f.name, content: toBase64(await f.arrayBuffer()), base64: true, size: f.size });
+      continue;
+    }
+    if (IMAGE_FILE.test(f.name) || /^image\/(png|jpeg|webp)$/i.test(f.type)) {
+      if (f.size > MAX_IMAGE) skipped.push(`${f.name} (больше 10 МБ)`);
       else files.push({ name: f.name, content: toBase64(await f.arrayBuffer()), base64: true, size: f.size });
       continue;
     }
     if (f.size > MAX_TEXT) {
-      skipped.push(`${f.name} (больше 300 КБ)`);
+      skipped.push(`${f.name} (больше 2 МБ)`);
       continue;
     }
     const content = await f.text();
-    if (content.includes("\u0000")) skipped.push(`${f.name} (не текст и не PDF)`);
+    if (content.includes("\u0000")) skipped.push(`${f.name} (неподдерживаемый бинарный файл)`);
     else files.push({ name: f.name, content, size: f.size });
   }
   return { files, skipped };
 }
 
 /** Drop zone with a "choose files" button and the list of chosen files. */
-export function FilePicker({ files, onChange, hint }: { files: PickedFile[]; onChange: (files: PickedFile[]) => void; hint?: string }) {
+export function FilePicker({
+  files,
+  onChange,
+  hint,
+  skipVision,
+  onSkipVision,
+}: {
+  files: PickedFile[];
+  onChange: (files: PickedFile[]) => void;
+  hint?: string;
+  skipVision?: boolean;
+  onSkipVision?: (v: boolean) => void;
+}) {
   const [dragging, setDragging] = useState(false);
   const [skipped, setSkipped] = useState<string[]>([]);
   const input = useRef<HTMLInputElement>(null);
+  const hasVisualDocs = files.some((f) => BINARY_DOC.test(f.name) || IMAGE_FILE.test(f.name));
 
   const add = async (list: FileList | File[]) => {
     const r = await readFiles(list);
@@ -72,7 +93,7 @@ export function FilePicker({ files, onChange, hint }: { files: PickedFile[]; onC
         className={cx("flex flex-wrap items-center justify-center gap-x-3 gap-y-2 rounded-md border border-dashed px-3 py-3.5 text-center text-sm transition-colors", dragging ? "border-accent bg-accent-soft" : "border-border-strong")}
       >
         <Icon name="upload" size={18} className="text-muted" />
-        <span className="text-muted">{hint ?? "Перетащи файлы сюда: конспекты, главы учебника, код, PDF"}</span>
+        <span className="text-muted">{hint ?? "Перетащи файлы сюда: PDF, Word (.docx), PowerPoint (.pptx), Jupyter (.ipynb), фото/схемы, код, конспекты"}</span>
         <Button small onClick={() => input.current?.click()}>
           Выбрать файлы
         </Button>
@@ -100,6 +121,17 @@ export function FilePicker({ files, onChange, hint }: { files: PickedFile[]; onC
             </li>
           ))}
         </ul>
+      )}
+      {hasVisualDocs && onSkipVision && (
+        <label className="flex cursor-pointer items-center gap-2 text-xs text-muted select-none">
+          <input
+            type="checkbox"
+            className="size-3.5 accent-accent"
+            checked={!!skipVision}
+            onChange={(e) => onSkipVision(e.target.checked)}
+          />
+          <span>Пропустить распознавание картинок и схем через модель (быстрее, только текст)</span>
+        </label>
       )}
       {skipped.length > 0 && <p className="text-xs text-warn">Пропущены: {skipped.join(", ")}</p>}
     </div>

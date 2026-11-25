@@ -148,6 +148,29 @@ function SummaryList({ title, tone, items }: { title: string; tone: "ok" | "warn
   );
 }
 
+function formatChars(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2).replace(".", ",")} млн`;
+  if (n >= 10_000) return `${Math.round(n / 1000)} тыс.`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1).replace(".", ",")} тыс.`;
+  return String(n);
+}
+
+function ContextBadge({ context }: { context: SessionView["context"] }) {
+  const tone =
+    context.level === "critical"
+      ? "bg-bad-soft font-medium text-bad"
+      : context.level === "warn"
+        ? "bg-warn-soft font-medium text-warn"
+        : "bg-surface-2 text-muted";
+  const saved = context.savedChars > 0 ? ` (оптимизация сэкономила ${context.savedChars.toLocaleString("ru-RU")} симв.)` : "";
+  const title = `Размер контекста урока: ${context.chars.toLocaleString("ru-RU")} из ${context.limit.toLocaleString("ru-RU")} символов${saved}`;
+  return (
+    <span className={cx("rounded px-2 py-1 text-xs whitespace-nowrap tabular-nums", tone)} title={title}>
+      {context.level === "ok" ? `${formatChars(context.chars)} симв.` : `${formatChars(context.chars)} / 1 млн`}
+    </span>
+  );
+}
+
 function Timer({ startedAt, endedAt, planned }: { startedAt: number; endedAt: number | null; planned: number | null }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -262,6 +285,7 @@ export default function SessionPage() {
   const [fatal, setFatal] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [emergencyBusy, setEmergencyBusy] = useState(false);
   const [streaming, setStreaming] = useState("");
   const [status, setStatus] = useState("");
   const [message, setMessage] = useState("");
@@ -304,7 +328,8 @@ export default function SessionPage() {
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
-      await load();
+      const fresh = await load();
+      if (fresh?.endedAt) setError(null);
       notifyChanged();
       setStreaming("");
       setStatus("");
@@ -312,6 +337,24 @@ export default function SessionPage() {
     },
     [id, load],
   );
+
+  const emergencyFinish = useCallback(async () => {
+    setEmergencyBusy(true);
+    setSheet(null);
+    setError(null);
+    try {
+      await api(`/api/sessions/${id}/emergency-finish`, { body: {} });
+      setStreaming("");
+      setStatus("");
+      setBusy(false);
+      await load();
+      notifyChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setEmergencyBusy(false);
+    }
+  }, [id, load]);
 
   // First load: start the session if nothing has happened yet.
   useEffect(() => {
@@ -411,6 +454,7 @@ export default function SessionPage() {
                 <Icon name="book" size={14} /> Книга
               </Button>
             )}
+            <ContextBadge context={view.context} />
             <Timer startedAt={view.startedAt} endedAt={view.endedAt} planned={view.plannedMinutes} />
           </>
         }
@@ -429,6 +473,9 @@ export default function SessionPage() {
               </StatusItem>
             )}
             {waiting && <StatusItem>Репетитор работает…</StatusItem>}
+            <StatusItem title={`Размер контекста: ${view.context.chars.toLocaleString("ru-RU")} из ${view.context.limit.toLocaleString("ru-RU")} симв.`}>
+              Контекст: {formatChars(view.context.chars)} / 1 млн
+            </StatusItem>
             <StatusItem title="Расход за сессию">
               {spent}
             </StatusItem>
@@ -475,7 +522,16 @@ export default function SessionPage() {
         {error && (
           <div className="enter">
             <Notice tone="bad">
-              <div>{error}</div>
+              <div className="space-y-2">
+                <div>{error}</div>
+                {!ended && (
+                  <div>
+                    <Button small variant="danger" disabled={emergencyBusy} onClick={emergencyFinish}>
+                      {emergencyBusy ? "Завершаю…" : "Экстренно завершить урок без нейронки"}
+                    </Button>
+                  </div>
+                )}
+              </div>
             </Notice>
           </div>
         )}
@@ -483,6 +539,48 @@ export default function SessionPage() {
           <Button variant="primary" onClick={() => send({ type: "retry" })}>
             Повторить
           </Button>
+        )}
+
+        {!ended && view.context.level === "warn" && (
+          <div className="enter">
+            <Notice tone="warn">
+              <div className="space-y-2">
+                <p>
+                  Контекст урока приближается к лимиту ({formatChars(view.context.chars)} из 1 млн символов). Скоро ответы просто перестанут доходить до репетитора из-за лимита
+                  контекста — лучше завершить обучение сейчас и продолжить в новой сессии.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button small variant="primary" disabled={waiting || emergencyBusy} onClick={() => send({ type: "finish" })}>
+                    Завершить и подвести итог
+                  </Button>
+                  <Button small variant="danger" disabled={emergencyBusy} onClick={emergencyFinish}>
+                    {emergencyBusy ? "Завершаю…" : "Экстренно завершить (без нейронки)"}
+                  </Button>
+                </div>
+              </div>
+            </Notice>
+          </div>
+        )}
+
+        {!ended && view.context.level === "critical" && (
+          <div className="enter">
+            <Notice tone="bad">
+              <div className="space-y-2">
+                <p>
+                  Контекст урока почти достиг лимита ({formatChars(view.context.chars)} из 1 млн символов)! Скоро ответы и даже запрос на завершение не смогут дойти до репетитора.
+                  Завершай урок прямо сейчас.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button small variant="danger" disabled={emergencyBusy} onClick={emergencyFinish}>
+                    {emergencyBusy ? "Завершаю…" : "Экстренно завершить (без нейронки)"}
+                  </Button>
+                  <Button small variant="secondary" disabled={waiting || emergencyBusy} onClick={() => send({ type: "finish" })}>
+                    Попробовать с итогом модели
+                  </Button>
+                </div>
+              </div>
+            </Notice>
+          </div>
         )}
 
         {overtime && !waiting && (
@@ -572,7 +670,7 @@ export default function SessionPage() {
             <Button small variant="ghost" className="shrink-0 px-2.5 whitespace-nowrap" onClick={() => setSheet("plan")}>
               План
             </Button>
-            <Button small variant="ghost" className="ml-auto shrink-0 px-2.5 whitespace-nowrap" onClick={() => setSheet("finish")} disabled={waiting}>
+            <Button small variant="ghost" className="ml-auto shrink-0 px-2.5 whitespace-nowrap" onClick={() => setSheet("finish")}>
               Завершить
             </Button>
           </div>
@@ -588,19 +686,33 @@ export default function SessionPage() {
         <PlanGraph plan={view.plan} />
       </Sheet>
       <Sheet open={sheet === "finish"} onClose={() => setSheet(null)} title="Завершить сессию?">
-        <div className="space-y-3">
-          <p className="text-sm text-muted">Репетитор подведёт итог: что освоено, где слабые места и с чего начать в следующий раз. Прогресс по узлам уже сохранён.</p>
-          <p className="text-sm text-muted">Расход за сессию: {spent}.</p>
-          <Button
-            variant="primary"
-            className="w-full"
-            onClick={() => {
-              setSheet(null);
-              send({ type: "finish" });
-            }}
-          >
-            Завершить и подвести итог
-          </Button>
+        <div className="space-y-4">
+          <div className="space-y-3">
+            <p className="text-sm text-muted">Репетитор подведёт итог: что освоено, где слабые места и с чего начать в следующий раз. Прогресс по узлам уже сохранён.</p>
+            <p className="text-sm text-muted">
+              Контекст: {formatChars(view.context.chars)} из 1 млн символов · Расход за сессию: {spent}.
+            </p>
+            <Button
+              variant="primary"
+              className="w-full"
+              disabled={waiting || emergencyBusy}
+              onClick={() => {
+                setSheet(null);
+                send({ type: "finish" });
+              }}
+            >
+              Завершить и подвести итог
+            </Button>
+          </div>
+
+          <div className="space-y-2 border-t border-border pt-3">
+            <p className="text-xs text-muted">
+              Если контекст переполнен или модель не отвечает, можно закрыть урок сразу без запроса к нейронке — прогресс сохранится, а краткий итог соберётся локально из базы.
+            </p>
+            <Button variant="danger" className="w-full" disabled={emergencyBusy} onClick={emergencyFinish}>
+              {emergencyBusy ? "Завершаю…" : "Экстренно завершить без нейронки"}
+            </Button>
+          </div>
         </div>
       </Sheet>
     </div>

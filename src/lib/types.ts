@@ -2,8 +2,14 @@
 
 export type QuestionKind = "choice" | "free" | "math" | "code" | "predict_output" | "find_bug" | "parsons";
 export type Purpose = "probe" | "predict" | "check" | "practice" | "review";
-export type Language = "python" | "javascript";
+export type Language = "python" | "javascript" | "sql";
 export type Outcome = "correct" | "partial" | "wrong" | "skipped";
+
+export const LANGUAGE_LABEL: Record<Language, string> = {
+  python: "Python",
+  javascript: "JavaScript",
+  sql: "SQL (PostgreSQL)",
+};
 
 export const KIND_LABEL: Record<QuestionKind, string> = {
   choice: "Выбор ответа",

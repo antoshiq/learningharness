@@ -40,6 +40,7 @@ export default function BriefPage() {
   const [code, setCode] = useState("");
   const [paths, setPaths] = useState("");
   const [uploads, setUploads] = useState<PickedFile[]>([]);
+  const [skipVision, setSkipVision] = useState(false);
   const [history, setHistory] = useState<Row[] | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [text, setText] = useState("");
@@ -86,7 +87,10 @@ export default function BriefPage() {
     // Files go along only where the mode uses them.
     const sent = kind === "topic" || kind === "files" || kind === "review" ? uploads.map(({ name, content, base64 }) => ({ name, content, base64 })) : [];
     try {
-      await streamPost("/api/briefs", { kind, depth, topic, repoPath, url, code: kind === "review" ? code : "", paths: kind === "files" ? pathList : [], uploads: sent }, (e) => {
+      await streamPost(
+        "/api/briefs",
+        { kind, depth, topic, repoPath, url, code: kind === "review" ? code : "", paths: kind === "files" ? pathList : [], uploads: sent, skipVision },
+        (e) => {
         if (e.type === "status") setStatus(e.text);
         else if (e.type === "text") {
           setStatus(null);
@@ -153,7 +157,7 @@ export default function BriefPage() {
           {kind === "topic" && (
             <div>
               <div className="mb-1 text-[13px] text-bright">Материалы (необязательно)</div>
-              <FilePicker files={uploads} onChange={setUploads} />
+              <FilePicker files={uploads} onChange={setUploads} skipVision={skipVision} onSkipVision={setSkipVision} />
               <p className="mt-1.5 text-xs text-muted">
                 {uploads.length
                   ? "Экскурс будет по этим файлам и в их терминах; «Учить это подробно» передаст их репетитору. Тему можно не писать."
@@ -175,7 +179,7 @@ export default function BriefPage() {
                   autoCorrect="off"
                 />
               </Field>
-              <FilePicker files={uploads} onChange={setUploads} hint="Или приложи файлы с кодом" />
+              <FilePicker files={uploads} onChange={setUploads} skipVision={skipVision} onSkipVision={setSkipVision} hint="Или приложи файлы с кодом" />
               <Field label="На что обратить внимание (необязательно)">
                 <input className={inputClass} value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="Производительность, обработка ошибок, читаемость…" />
               </Field>
@@ -205,7 +209,7 @@ export default function BriefPage() {
                 value={repoPath}
                 onChange={(e) => setRepoPath(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && submit()}
-                placeholder="C:\Users\...\my-project или https://github.com/owner/repo"
+                placeholder="~/projects/my-project или https://github.com/owner/repo"
                 spellCheck={false}
                 autoCapitalize="off"
                 autoCorrect="off"
@@ -215,13 +219,19 @@ export default function BriefPage() {
 
           {kind === "files" && (
             <div className="space-y-3">
-              <FilePicker files={uploads} onChange={setUploads} hint="Перетащи файлы сюда: код, текст, Markdown, PDF" />
+              <FilePicker
+                files={uploads}
+                onChange={setUploads}
+                skipVision={skipVision}
+                onSkipVision={setSkipVision}
+                hint="Перетащи файлы сюда: PDF, Word (.docx), PowerPoint (.pptx), Jupyter (.ipynb), фото/схемы, код, Markdown"
+              />
               <Field label="Или пути к файлам на этом компьютере, по одному в строке">
                 <textarea
                   className={cx(inputClass, "min-h-20 resize-y font-mono text-[13px]")}
                   value={paths}
                   onChange={(e) => setPaths(e.target.value)}
-                  placeholder={"C:\\Users\\...\\project\\src\\main.py"}
+                  placeholder={"~/projects/app/src/main.py"}
                   spellCheck={false}
                 />
               </Field>

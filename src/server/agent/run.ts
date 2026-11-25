@@ -1,7 +1,7 @@
 // One application turn: take the learner's input, append it to the saved
 // history, then let the model work (possibly several calls with tools) until
 // it asks a question, ends the session, or finishes speaking.
-import { eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { getDb, schema } from "../db";
 import type { Db } from "../db";
 import { getRoles, getTheoryDepth } from "../config";
@@ -11,16 +11,22 @@ import { applyAttempt } from "../mastery";
 import { captureTheory } from "../theory";
 import { takeFeedback } from "../feedback";
 import { gradeAuto, normalizeOutput } from "@/lib/grading";
-import type { AnswerPayload, Outcome, Question, StreamEvent, TurnInput } from "@/lib/types";
+import type { AnswerPayload, Outcome, Question, SessionSummary, StreamEvent, TurnInput } from "@/lib/types";
+import { compactMessagesForLlm } from "./context";
 import { systemPrompt } from "./prompts";
-import { initialState, planStateText, STATE_PREFIX, SYSTEM_PREFIX } from "./state";
+import { initialState, planStateText, planView, STATE_PREFIX, SYSTEM_PREFIX } from "./state";
 import { executeToolAsync, semesterBookIds, toolDefs } from "./tools";
 import { runClaudeCodeTurn } from "./claude-code";
 import type { PendingState } from "../db/schema";
 
 const MAX_STEPS = 40;
-const g = globalThis as unknown as { __tutorRunning?: Set<number>; __tutorInvalid?: Map<number, number> };
+const g = globalThis as unknown as {
+  __tutorRunning?: Set<number>;
+  __tutorAbort?: Map<number, AbortController>;
+  __tutorInvalid?: Map<number, number>;
+};
 const running = (g.__tutorRunning ??= new Set());
+const runningAbort = (g.__tutorAbort ??= new Map());
 const invalidStreak = (g.__tutorInvalid ??= new Map());
 
 export const isRunning = (sessionId: number) => running.has(sessionId);
@@ -199,7 +205,9 @@ function appendInput(db: Db, sessionId: number, input: TurnInput, emit: (e: Stre
 export async function runTurn(sessionId: number, input: TurnInput, emit: (e: StreamEvent) => void): Promise<void> {
   const db = getDb();
   if (running.has(sessionId)) throw new TurnError("В этой сессии уже идёт ход", 409);
+  const ac = new AbortController();
   running.add(sessionId);
+  runningAbort.set(sessionId, ac);
   try {
     appendInput(db, sessionId, input, emit);
 
@@ -211,19 +219,24 @@ export async function runTurn(sessionId: number, input: TurnInput, emit: (e: Str
     }
 
     for (let step = 0; step < MAX_STEPS; step++) {
+      if (ac.signal.aborted) return;
       const { session, topic } = loadSession(db, sessionId);
+      if (session.endedAt) return;
       emit({ type: "status", text: step === 0 ? "Думаю…" : "Продолжаю…" });
 
       let streamed = false;
       const result = await chatAs("strong", session.kind, sessionId, {
         system: systemPrompt(session.kind, topic.kind, getTheoryDepth()),
-        messages: session.messages,
+        messages: compactMessagesForLlm(session.messages),
         tools: toolDefs(topic.kind, semesterBookIds(db, topic).length > 0),
+        signal: ac.signal,
         onText: (delta) => {
+          if (ac.signal.aborted) return;
           streamed = true;
           emit({ type: "text", delta });
         },
       });
+      if (ac.signal.aborted || loadSession(db, sessionId).session.endedAt) return;
       if (streamed) emit({ type: "text_end" });
 
       const toolUses = result.content.filter(isToolUse);
@@ -240,11 +253,13 @@ export async function runTurn(sessionId: number, input: TurnInput, emit: (e: Str
       const assistant: ChatMsg = { role: "assistant", content: result.content };
       const history = [...session.messages, assistant];
       if (!toolUses.length) {
+        if (ac.signal.aborted || loadSession(db, sessionId).session.endedAt) return;
         db.update(schema.sessions).set({ messages: history }).where(eq(schema.sessions.id, sessionId)).run();
         return;
       }
 
       // Save the assistant message before running tools so tools see current state.
+      if (ac.signal.aborted || loadSession(db, sessionId).session.endedAt) return;
       db.update(schema.sessions).set({ messages: history }).where(eq(schema.sessions.id, sessionId)).run();
       const ctx = { db, session: { ...session, messages: history }, topic };
       const results: ToolResultBlock[] = [];
@@ -252,6 +267,7 @@ export async function runTurn(sessionId: number, input: TurnInput, emit: (e: Str
       let ended = false;
 
       for (const tu of toolUses) {
+        if (ac.signal.aborted) return;
         if (tu.name === "ask_question" && pending) {
           results.push({ type: "tool_result", tool_use_id: tu.id, content: "За один раз можно задать только один вопрос.", is_error: true });
           continue;
@@ -270,7 +286,9 @@ export async function runTurn(sessionId: number, input: TurnInput, emit: (e: Str
         results.push({ type: "tool_result", tool_use_id: tu.id, content: out.content, ...(out.isError ? { is_error: true } : {}) });
       }
 
+      if (ac.signal.aborted) return;
       if (pending) {
+        if (loadSession(db, sessionId).session.endedAt) return;
         // The question's own result is written when the learner answers.
         const state: PendingState = {
           ...pending,
@@ -288,7 +306,116 @@ export async function runTurn(sessionId: number, input: TurnInput, emit: (e: Str
       if (ended) return;
     }
     emit({ type: "error", message: "Слишком много шагов подряд без вопроса к тебе. Напиши сообщение, чтобы продолжить." });
+  } catch (e) {
+    if (ac.signal.aborted) return;
+    throw e;
   } finally {
+    if (runningAbort.get(sessionId) === ac) {
+      runningAbort.delete(sessionId);
+      running.delete(sessionId);
+    }
+  }
+}
+
+/** Build a factual session summary purely from the database, without calling any LLM. */
+export function buildLocalSummary(db: Db, sessionId: number, topicId: number): SessionSummary {
+  const plan = planView(db, topicId);
+  const titleByKey = new Map(plan.map((n) => [n.key, n.title]));
+  const statusByKey = new Map(plan.map((n) => [n.key, n.status]));
+  const rows = db
+    .select()
+    .from(schema.attempts)
+    .where(and(eq(schema.attempts.sessionId, sessionId)))
+    .orderBy(asc(schema.attempts.id))
+    .all();
+
+  const lastOutcome = new Map<string, Outcome>();
+  const everCorrect = new Set<string>();
+  const weakNotes = new Map<string, string>();
+  let diagWrong = 0;
+
+  for (const a of rows) {
+    if (!a.outcome || a.outcome === "skipped") continue;
+    if (a.nodeKey) {
+      lastOutcome.set(a.nodeKey, a.outcome);
+      if (a.outcome === "correct") {
+        everCorrect.add(a.nodeKey);
+        weakNotes.delete(a.nodeKey);
+      } else if (a.outcome === "wrong" || a.outcome === "partial") {
+        const label = titleByKey.get(a.nodeKey) ?? a.nodeKey;
+        weakNotes.set(a.nodeKey, a.misconception ? `${label}: ${a.misconception}` : label);
+      }
+    } else if (a.outcome === "wrong" || a.outcome === "partial") {
+      diagWrong++;
+    }
+  }
+
+  const learned: string[] = [];
+  for (const key of everCorrect) {
+    if (statusByKey.get(key) === "mastered" || lastOutcome.get(key) === "correct") {
+      learned.push(titleByKey.get(key) ?? key);
+    }
+  }
+
+  const weak = [...weakNotes.values()];
+  if (diagWrong > 0 && !weak.length) {
+    weak.push(`В диагностике были затруднения (${diagWrong} вопр.).`);
+  }
+
+  const nextAvailable = plan.filter((n) => n.status !== "mastered" && n.available);
+  let next: string;
+  if (!plan.length) {
+    next = "Начать новую сессию и завершить диагностику.";
+  } else if (!nextAvailable.length && plan.every((n) => n.status === "mastered")) {
+    next = "Все узлы плана освоены — можно закрепить материал в повторении или на экзамене.";
+  } else if (nextAvailable.length) {
+    const first = nextAvailable[0];
+    next = weak.length
+      ? `Разобрать слабые места и продолжить с узла «${first.title}».`
+      : `Продолжить с узла «${first.title}».`;
+  } else {
+    next = "Открыть новую сессию и продолжить по плану темы.";
+  }
+
+  return { learned, weak, next };
+}
+
+/**
+ * Finish a session immediately without calling the model (e.g. when context is
+ * near/over the limit or a model request is hanging). Aborts any running turn,
+ * closes any pending question, and stores a locally computed summary.
+ */
+export function emergencyFinishSession(sessionId: number): SessionSummary {
+  const db = getDb();
+  const { session, topic } = loadSession(db, sessionId);
+
+  const ac = runningAbort.get(sessionId);
+  if (ac) {
+    runningAbort.delete(sessionId);
+    running.delete(sessionId);
+    ac.abort();
+  } else {
     running.delete(sessionId);
   }
+
+  if (session.endedAt) {
+    return session.summary ?? buildLocalSummary(db, sessionId, topic.id);
+  }
+
+  const now = Date.now();
+  if (session.pending) {
+    db.update(schema.attempts)
+      .set({ outcome: "skipped", answeredAt: now })
+      .where(eq(schema.attempts.id, session.pending.attemptId))
+      .run();
+  }
+
+  const summary = buildLocalSummary(db, sessionId, topic.id);
+  db.update(schema.sessions)
+    .set({ endedAt: now, summary, pending: null, cc: null })
+    .where(eq(schema.sessions.id, sessionId))
+    .run();
+  db.update(schema.topics).set({ updatedAt: now }).where(eq(schema.topics.id, topic.id)).run();
+  invalidStreak.delete(sessionId);
+  return summary;
 }

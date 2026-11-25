@@ -38,7 +38,7 @@ const AskQuestion = z
     prompt: z.string().min(1).describe("Текст вопроса в Markdown. Без ответа."),
     options: z.array(z.string()).optional().describe("choice: варианты ответа"),
     correct_option: z.number().int().optional().describe("choice: индекс верного варианта, с нуля"),
-    language: z.enum(["python", "javascript"]).optional().describe("для code, predict_output, find_bug, parsons"),
+    language: z.enum(["python", "javascript", "sql"]).optional().describe("для code, predict_output, find_bug, parsons (sql — PostgreSQL)"),
     code: z.string().optional().describe("predict_output: программа; find_bug: программа с ошибкой; code: заготовка"),
     solution: z.string().optional().describe("code, find_bug: эталонное решение; parsons: правильная программа"),
     tests: z.string().optional().describe("code, find_bug: проверки, выполняются после кода ученика"),

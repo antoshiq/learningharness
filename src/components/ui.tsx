@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useEffectEvent, useState, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from "react";
+import { useDesignStyle } from "@/lib/theme";
 import { useWorkbench } from "./workbench-context";
 
 export const cx = (...parts: (string | false | null | undefined)[]) => parts.filter(Boolean).join(" ");
@@ -104,7 +105,7 @@ const VARIANT: Record<Variant, string> = {
   ghost: "text-muted hover:text-bright hover:bg-surface-2 disabled:opacity-40",
   danger: "border border-bad text-bad hover:bg-bad-soft disabled:opacity-40",
 };
-const buttonBase = "inline-flex items-center justify-center gap-1.5 rounded-sm font-normal whitespace-nowrap transition-[color,background-color,border-color,transform] duration-150 select-none active:scale-[0.97] disabled:active:scale-100";
+const buttonBase = "ui-btn inline-flex items-center justify-center gap-1.5 rounded-sm font-normal whitespace-nowrap transition-[color,background-color,border-color,transform] duration-150 select-none active:scale-[0.97] disabled:active:scale-100";
 // Compact like an editor on desktop, finger-sized on a phone.
 const buttonSize = (small?: boolean) => (small ? "min-h-9 px-2.5 text-[13px] sm:min-h-[26px]" : "min-h-10 px-3.5 text-sm sm:min-h-[30px] sm:text-[13px]");
 
@@ -139,7 +140,7 @@ export function LinkButton({
 
 /** A panel: the darker chrome surface with a hairline border. */
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cx("rounded-md border border-border bg-surface p-4 sm:p-5 minimal:rounded-lg", className)}>{children}</div>;
+  return <div className={cx("ui-card rounded-md border border-border bg-surface p-4 sm:p-5 minimal:rounded-lg", className)}>{children}</div>;
 }
 
 /** Header of a panel. */
@@ -154,10 +155,10 @@ export function PanelTitle({ children, right }: { children: ReactNode; right?: R
 
 /** inputClass without the full width, for small inline fields (numbers, selects in a row). */
 export const fieldClass =
-  "rounded-sm border border-border-strong bg-input px-2.5 py-2 text-text placeholder:text-muted/80 transition-[border-color,box-shadow] duration-150 focus:border-accent focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_22%,transparent)] focus:outline-none sm:py-1.5";
+  "ui-input rounded-sm border border-border-strong bg-input px-2.5 py-2 text-text placeholder:text-muted/80 transition-[border-color,box-shadow] duration-150 focus:border-accent focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_22%,transparent)] focus:outline-none sm:py-1.5";
 
 export const inputClass =
-  "w-full rounded-sm border border-border-strong bg-input px-2.5 py-2 text-text placeholder:text-muted/80 transition-[border-color,box-shadow] duration-150 focus:border-accent focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_22%,transparent)] focus:outline-none sm:py-1.5";
+  "ui-input w-full rounded-sm border border-border-strong bg-input px-2.5 py-2 text-text placeholder:text-muted/80 transition-[border-color,box-shadow] duration-150 focus:border-accent focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_22%,transparent)] focus:outline-none sm:py-1.5";
 
 export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
@@ -182,7 +183,7 @@ export function Segmented<T extends string | number>({
   label?: string;
 }) {
   return (
-    <div className="flex overflow-hidden rounded-sm border border-border-strong" role="group" aria-label={label}>
+    <div className="ui-segmented flex overflow-hidden rounded-sm border border-border-strong" role="group" aria-label={label}>
       {options.map(([v, text], i) => (
         <button
           key={String(v)}
@@ -214,7 +215,7 @@ const TONE_TEXT: Record<Tone, string> = { neutral: "text-muted", ok: "text-ok", 
 const TONE_EDGE: Record<Tone, string> = { neutral: "border-l-border-strong", ok: "border-l-ok", bad: "border-l-bad", warn: "border-l-warn", accent: "border-l-accent" };
 
 export function Badge({ tone = "neutral", children }: { tone?: Tone; children: ReactNode }) {
-  return <span className={cx("inline-flex items-center rounded-sm px-1.5 py-px text-[11px] whitespace-nowrap", TONE[tone])}>{children}</span>;
+  return <span className={cx("ui-badge inline-flex items-center rounded-sm px-1.5 py-px text-[11px] whitespace-nowrap", TONE[tone])}>{children}</span>;
 }
 
 /** Counter pill, as on the activity bar and view tabs. */
@@ -229,7 +230,7 @@ export function Count({ n, active }: { n: number; active?: boolean }) {
 /** Inline message, shaped like an editor notification. */
 export function Notice({ tone = "neutral", children }: { tone?: Tone; children: ReactNode }) {
   return (
-    <div className={cx("flex gap-2.5 rounded-sm border border-l-2 border-border bg-surface px-3 py-2 text-[13px] [overflow-wrap:anywhere]", TONE_EDGE[tone])}>
+    <div className={cx("ui-notice flex gap-2.5 rounded-sm border border-l-2 border-border bg-surface px-3 py-2 text-[13px] [overflow-wrap:anywhere]", TONE_EDGE[tone])}>
       <Icon name={tone === "bad" ? "cross" : tone === "ok" ? "check" : "info"} className={cx("mt-0.5", TONE_TEXT[tone])} />
       <div className="min-w-0 flex-1">{children}</div>
     </div>
@@ -300,7 +301,7 @@ export function Sheet({
       <div
         className={cx(
           closing ? "sheet-out" : "sheet-in",
-          "sheet-bottom relative flex max-h-[88dvh] w-full flex-col rounded-t-lg border border-border-strong bg-surface shadow-widget sm:max-h-[80dvh] sm:rounded-lg",
+          "ui-sheet sheet-bottom relative flex max-h-[88dvh] w-full flex-col rounded-t-lg border border-border-strong bg-surface shadow-widget sm:max-h-[80dvh] sm:rounded-lg",
           wide ? "sm:max-w-3xl" : "sm:max-w-lg",
         )}
       >
@@ -378,6 +379,7 @@ export function TopNav({
 }) {
   const trail: Crumb[] = [{ label: "Репетитор", href: "/" }, ...crumbs];
   const { model, mock, openPalette } = useWorkbench();
+  const [style] = useDesignStyle();
   const path = (className: string) => (
     <nav className={cx("items-center gap-0.5 overflow-hidden text-[13px] text-muted", className)} aria-label="Путь">
       {trail.map((c, i) => (
@@ -394,9 +396,105 @@ export function TopNav({
       ))}
     </nav>
   );
+
+  if (style === "obsidian") {
+    return (
+      <header className="sticky top-0 z-30 bg-bg/95 backdrop-blur-sm">
+        <div className="flex h-10 items-center gap-2 border-b border-border bg-chrome/60 px-3">
+          <div className="flex h-8 max-w-[65%] items-center gap-2 self-end rounded-t-md border border-b-0 border-border border-t-2 border-t-accent bg-bg px-3 text-[13px] text-bright">
+            <Icon name={icon} size={14} className="text-accent" />
+            <span className="truncate">{tab}</span>
+          </div>
+          <div className="flex flex-1 items-center justify-end gap-1.5">{right}</div>
+        </div>
+        {crumbs.length > 0 && path("flex h-7 border-b border-border/60 px-4 text-xs")}
+        <div className="h-0.5 overflow-hidden" aria-hidden>
+          {busy && <div className="progress-bar h-full w-1/4 bg-accent-strong" />}
+        </div>
+      </header>
+    );
+  }
+
+  if (style === "paper") {
+    return (
+      <header className="sticky top-0 z-30 border-b border-border bg-bg/95 backdrop-blur-sm">
+        <div className="mx-auto flex h-10 max-w-5xl items-center gap-2 px-4 sm:px-8">
+          {path("flex min-w-0 font-serif text-[13px]")}
+          <div className="flex flex-1 items-center justify-end gap-1.5">{right}</div>
+        </div>
+        <div className="h-0.5 overflow-hidden" aria-hidden>
+          {busy && <div className="progress-bar h-full w-1/4 bg-accent-strong" />}
+        </div>
+      </header>
+    );
+  }
+
+  if (style === "catppuccin") {
+    return (
+      <header className="sticky top-0 z-30 bg-bg/85 backdrop-blur-md">
+        <div className="mx-auto flex h-11 max-w-5xl items-center gap-2 px-4 sm:px-8">
+          <div className="flex min-w-0 items-center gap-1.5 rounded-full border border-border bg-surface/80 px-3 py-1">
+            <Icon name={icon} size={14} className="text-accent" />
+            {path("flex min-w-0")}
+          </div>
+          <div className="flex flex-1 items-center justify-end gap-1.5">{right}</div>
+        </div>
+        <div className="h-0.5 overflow-hidden" aria-hidden>
+          {busy && <div className="progress-bar h-full w-1/4 bg-accent-strong" />}
+        </div>
+      </header>
+    );
+  }
+
+  if (style === "gruvbox") {
+    return (
+      <>
+        <header className="sticky top-0 z-30 border-b border-border-strong bg-surface font-mono">
+          <div className="flex h-9 items-center gap-2 px-3">
+            <span className="bg-surface-2 px-2 py-0.5 text-xs font-semibold text-accent">[{tab}]</span>
+            {path("hidden min-w-0 text-xs sm:flex")}
+            <div className="flex flex-1 items-center justify-end gap-1.5">{right}</div>
+          </div>
+          <div className="h-0.5 overflow-hidden" aria-hidden>
+            {busy && <div className="progress-bar h-full w-1/4 bg-accent-strong" />}
+          </div>
+        </header>
+        <footer className="fixed inset-x-0 bottom-0 z-40 hidden h-7 items-center gap-3 border-t border-border-strong bg-chrome pr-3 font-mono text-xs whitespace-nowrap text-muted sm:flex">
+          <span className="flex h-full items-center bg-accent-strong px-2.5 font-semibold text-accent-fg">NORMAL</span>
+          <span className="text-bright">{tab}</span>
+          {status && <span className="text-border-strong">|</span>}
+          {status}
+          <span className="flex-1" />
+          {(mock || model) && (
+            <Link href="/settings" className="flex h-full items-center gap-1.5 bg-surface-2 px-2 text-text hover:text-accent" title="Модель, которая ведёт уроки">
+              {mock ? "mock" : model}
+            </Link>
+          )}
+          <button onClick={openPalette} className="flex h-full items-center gap-1 bg-surface px-2 text-accent hover:bg-surface-2" title="Поиск и команды">
+            :Ctrl+K
+          </button>
+        </footer>
+      </>
+    );
+  }
+
+  if (style === "linear") {
+    return (
+      <header className="sticky top-0 z-30 border-b border-border bg-bg/90 backdrop-blur-md">
+        <div className="flex h-11 items-center gap-2 px-4 sm:px-7">
+          {path("flex min-w-0 text-[13px]")}
+          <div className="flex flex-1 items-center justify-end gap-2">{right}</div>
+        </div>
+        <div className="h-0.5 overflow-hidden" aria-hidden>
+          {busy && <div className="progress-bar h-full w-1/4 bg-accent-strong" />}
+        </div>
+      </header>
+    );
+  }
+
   return (
     <>
-      {/* Classic: a tab for the open "file", the path below it. Minimal: the path and the page's buttons in one quiet row. */}
+      {/* Default VS Code: a tab for the open "file", the path below it (or quiet row in minimal). */}
       <header className="sticky top-0 z-30 bg-bg">
         <div className="flex h-10 items-center border-b border-border bg-surface px-1.5 minimal:bg-bg/90 minimal:px-3 minimal:backdrop-blur-sm">
           <div className="flex h-7 max-w-[70%] items-center gap-2 rounded-md bg-surface-2 px-2.5 text-[13px] text-bright minimal:hidden">

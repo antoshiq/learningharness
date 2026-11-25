@@ -1,18 +1,26 @@
 // Text out of PDFs and web pages, for overviews of documents and links.
+import { createHash } from "node:crypto";
 import dns from "node:dns/promises";
 import net from "node:net";
+import { mockEnabled } from "./config";
 
-const MAX_PDF_BYTES = 30 * 1024 * 1024;
+const MAX_PDF_BYTES = 50 * 1024 * 1024;
 const MAX_PAGE_BYTES = 5 * 1024 * 1024;
 
 export const isPdf = (buf: Uint8Array) => buf.length > 4 && buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46; // %PDF
 
 /** Scanned pages recognized on the spot (a request, not a background job), at most this many. */
 const MAX_OCR_PAGES = 60;
+/** Max embedded figures/diagrams described via vision in one uploaded PDF. */
+const MAX_PDF_FIGURES = 20;
 
-export async function pdfText(buf: Uint8Array): Promise<{ text: string; pages: number }> {
-  if (buf.length > MAX_PDF_BYTES) throw new Error("PDF больше 30 МБ");
-  const { getDocumentProxy, extractText } = await import("unpdf");
+export async function pdfText(
+  buf: Uint8Array,
+  opts: { useVision?: boolean; onProgress?: (text: string) => void } = {},
+): Promise<{ text: string; pages: number }> {
+  if (buf.length > MAX_PDF_BYTES) throw new Error("PDF больше 50 МБ");
+  opts.onProgress?.("Читаю текст PDF…");
+  const { getDocumentProxy, extractText, extractImages } = await import("unpdf");
   let doc;
   try {
     doc = await getDocumentProxy(new Uint8Array(buf));
@@ -21,13 +29,88 @@ export async function pdfText(buf: Uint8Array): Promise<{ text: string; pages: n
   }
   const r = await extractText(doc, { mergePages: false });
   const raw = (r.text as string[]).map((t) => t.replace(/[ \t]+\n/g, "\n").trim());
-  // Scanned pages (no text layer) are read by OCR, which needs no model.
-  const { looksScanned, ocrPdfPage } = await import("./ocr");
+  const { encodeRawImagePng, looksScanned, ocrPdfPage } = await import("./ocr");
+  const { describeDocumentImages } = await import("./vision");
+  const allowVision = opts.useVision !== false && !mockEnabled();
+
   const scanned = raw.map((t, i) => (looksScanned(t) ? i : -1)).filter((i) => i >= 0);
   if (scanned.length > MAX_OCR_PAGES) {
     throw new Error(`В PDF ${scanned.length} страниц-сканов: здесь распознаются до ${MAX_OCR_PAGES}. Длинный скан загрузи в «Семестр» — там книга распознаётся в фоне целиком.`);
   }
-  for (const i of scanned) raw[i] = await ocrPdfPage(doc, i + 1).catch(() => "");
+
+  // 1) Scanned pages: prefer the vision model (reads formulas, tables, diagrams); fall back to local OCR.
+  if (scanned.length) {
+    const scanImgs: { label: string; pageIdx: number; buffer: Buffer }[] = [];
+    if (allowVision) {
+      opts.onProgress?.(`Извлекаю страницы-сканы (${scanned.length})…`);
+      for (const i of scanned) {
+        try {
+          const imgs = (await extractImages(doc, i + 1)).filter((im) => im.width >= 200 && im.height >= 100);
+          // Pick the largest image on the scanned page (usually the full page scan).
+          imgs.sort((a, b) => b.width * b.height - a.width * a.height);
+          if (imgs[0]) {
+            scanImgs.push({ label: `p${i}`, pageIdx: i, buffer: encodeRawImagePng(imgs[0], 2000) });
+          }
+        } catch {
+          /* fall back to OCR below */
+        }
+      }
+    }
+    const visionText = scanImgs.length
+      ? await describeDocumentImages(
+          scanImgs.map((x) => ({ label: x.label, buffer: x.buffer })),
+          "scan",
+          { onProgress: (done, total) => opts.onProgress?.(`Распознаю сканы через модель (${done} из ${total})…`) },
+        )
+      : new Map<string, string>();
+    let ocrIdx = 0;
+    const needOcr = scanned.filter((i) => !visionText.get(`p${i}`));
+    for (const i of scanned) {
+      const fromModel = visionText.get(`p${i}`);
+      if (fromModel) {
+        raw[i] = fromModel;
+      } else {
+        ocrIdx++;
+        opts.onProgress?.(`Локальный OCR страницы-скана (${ocrIdx} из ${needOcr.length})…`);
+        raw[i] = await ocrPdfPage(doc, i + 1).catch(() => "");
+      }
+    }
+  }
+
+  // 2) Embedded diagrams, schemas, charts and tables-as-images on regular text pages.
+  if (allowVision) {
+    const scannedSet = new Set(scanned);
+    const seenHashes = new Set<string>();
+    const figs: { label: string; pageIdx: number; buffer: Buffer }[] = [];
+    for (let i = 0; i < raw.length && figs.length < MAX_PDF_FIGURES; i++) {
+      if (scannedSet.has(i)) continue;
+      try {
+        const imgs = (await extractImages(doc, i + 1)).filter((im) => im.width >= 240 && im.height >= 160);
+        for (const im of imgs) {
+          if (figs.length >= MAX_PDF_FIGURES) break;
+          // Deduplicate repeated headers, footers and university logos across pages.
+          const hash = createHash("sha256").update(im.data.subarray(0, Math.min(im.data.length, 65_536))).update(`${im.width}x${im.height}x${im.channels}`).digest("hex");
+          if (seenHashes.has(hash)) continue;
+          seenHashes.add(hash);
+          figs.push({ label: `f${i}_${figs.length}`, pageIdx: i, buffer: encodeRawImagePng(im, 1600) });
+        }
+      } catch {
+        /* ignore pages whose images unpdf cannot decode */
+      }
+    }
+    if (figs.length) {
+      const described = await describeDocumentImages(
+        figs.map((x) => ({ label: x.label, buffer: x.buffer })),
+        "figure",
+        { onProgress: (done, total) => opts.onProgress?.(`Расшифровываю схемы и таблицы (${done} из ${total})…`) },
+      );
+      for (const f of figs) {
+        const desc = described.get(f.label);
+        if (desc) raw[f.pageIdx] = [raw[f.pageIdx], `[Иллюстрация/схема на стр. ${f.pageIdx + 1}]:\n${desc}`].filter(Boolean).join("\n\n");
+      }
+    }
+  }
+
   const text = raw.map((t, i) => `[стр. ${i + 1}]\n${t}`).join("\n\n").trim();
   if (text.replace(/\[стр\. \d+\]/g, "").trim().length < 20) throw new Error("В PDF не удалось найти текст: ни текстового слоя, ни читаемых сканов.");
   return { text, pages: r.totalPages };

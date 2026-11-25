@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { api, formatDate } from "@/lib/api";
+import { api, formatDate, streamPost } from "@/lib/api";
 import { FilePicker, type PickedFile } from "./FilePicker";
-import { Button, Icon, Notice } from "./ui";
+import { Button, Dots, Icon, Notice } from "./ui";
 
 export interface Material {
   id: number;
@@ -12,26 +12,43 @@ export interface Material {
   createdAt: number;
 }
 
-/** Roughly how many lesson-context characters the materials take: lessons see up to 60 000. */
-const LESSON_BUDGET = 60_000;
+/** Roughly how many lesson-context characters the materials take: lessons see up to 250 000. */
+const LESSON_BUDGET = 250_000;
 
 /** Files the tutor teaches from: add more, remove what is no longer needed. */
 export function MaterialsTab({ topicId, files, onChanged }: { topicId: number; files: Material[]; onChanged: () => Promise<void> }) {
   const [picked, setPicked] = useState<PickedFile[]>([]);
+  const [skipVision, setSkipVision] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const total = files.reduce((n, f) => n + f.chars, 0);
 
   const add = async () => {
     setBusy(true);
     setError(null);
+    setStatus("Загружаю файлы…");
+    let failed = false;
     try {
-      await api(`/api/topics/${topicId}/files`, { body: { uploads: picked.map(({ name, content, base64 }) => ({ name, content, base64 })) } });
-      setPicked([]);
-      await onChanged();
+      await streamPost(
+        `/api/topics/${topicId}/files`,
+        { uploads: picked.map(({ name, content, base64 }) => ({ name, content, base64 })), skipVision, stream: true },
+        (e) => {
+          if (e.type === "status") setStatus(e.text);
+          else if (e.type === "error") {
+            failed = true;
+            setError(e.message);
+          }
+        },
+      );
+      if (!failed) {
+        setPicked([]);
+        await onChanged();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
+    setStatus(null);
     setBusy(false);
   };
 
@@ -75,7 +92,12 @@ export function MaterialsTab({ topicId, files, onChanged }: { topicId: number; f
           Материалов {total.toLocaleString("ru-RU")} символов, а урок видит первые {LESSON_BUDGET.toLocaleString("ru-RU")}: остальное обрезается. Оставь главное или раздели на несколько тем.
         </Notice>
       )}
-      <FilePicker files={picked} onChange={setPicked} />
+      <FilePicker files={picked} onChange={setPicked} skipVision={skipVision} onSkipVision={setSkipVision} />
+      {busy && status && (
+        <div className="flex items-center gap-2 text-sm text-muted" aria-live="polite">
+          <Dots /> {status}
+        </div>
+      )}
       {error && <Notice tone="bad">{error}</Notice>}
       {picked.length > 0 && (
         <Button variant="primary" onClick={add} disabled={busy}>

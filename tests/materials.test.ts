@@ -66,7 +66,8 @@ describe("topic materials", () => {
 
   it("refuses secrets and binaries, and cuts what does not fit the lesson", async () => {
     await expect(m.uploadText({ name: ".env", content: "KEY=1" })).rejects.toThrow(/секрет/);
-    await expect(m.uploadText({ name: "img.png", content: Buffer.from([0x89, 0x50, 0, 0, 1]).toString("base64"), base64: true })).rejects.toThrow(/не текстовый/);
+    await expect(m.uploadText({ name: "app.bin", content: Buffer.from([0x7f, 0x45, 0, 0, 1]).toString("base64"), base64: true })).rejects.toThrow(/поддерживаются/);
+    await expect(m.uploadText({ name: "img.png", content: Buffer.from([0x89, 0x50, 0, 0, 1]).toString("base64"), base64: true })).rejects.toThrow(/поддерживаются изображения/);
     const db = dbmod.getDb();
     const t = db.insert(dbmod.schema.topics).values({ title: "Большая", createdAt: 1, updatedAt: 1 }).returning().get();
     await m.addMaterials(t.id, [

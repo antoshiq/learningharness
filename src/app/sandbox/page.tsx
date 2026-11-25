@@ -1,14 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CodeEditor } from "@/components/CodeEditor";
 import { EditorPrefsButtons, toolButton } from "@/components/EditorTools";
 import { Markdown } from "@/components/Markdown";
-import { Button, cx, Dots, Icon, inputClass, isSubmitKey, Kbd, KeyHandler, Page, Segmented, Sheet, StatusItem, TopNav } from "@/components/ui";
+import { Badge, Button, cx, Dots, Icon, inputClass, isSubmitKey, Kbd, KeyHandler, Page, Segmented, Sheet, StatusItem, TopNav } from "@/components/ui";
 import { formatDate, streamPost } from "@/lib/api";
 import { runSandbox, stopSandbox, type RunOutcome } from "@/lib/runner";
 import { SANDBOX_INCOMING } from "@/lib/sandbox";
-import type { Language } from "@/lib/types";
+import { buildCodeMirrorSqlSchema, type SqlTableSchema } from "@/lib/sql-schema";
+import { LANGUAGE_LABEL, type Language } from "@/lib/types";
 
 interface File {
   name: string;
@@ -26,7 +27,7 @@ interface Saved extends Workspace {
   savedAt: number;
 }
 
-const EXT: Record<Language, string> = { python: ".py", javascript: ".js" };
+const EXT: Record<Language, string> = { python: ".py", javascript: ".js", sql: ".sql" };
 const STARTER: Record<Language, Workspace> = {
   python: {
     files: [
@@ -45,6 +46,23 @@ const STARTER: Record<Language, Workspace> = {
     active: "main.js",
     main: "main.js",
     stdin: "Аня",
+  },
+  sql: {
+    files: [
+      {
+        name: "main.sql",
+        content:
+          "\\i schema.sql\n\n-- Средний балл и рейтинг студентов по группам (PostgreSQL)\nSELECT\n  grp,\n  name,\n  score,\n  ROUND(AVG(score) OVER (PARTITION BY grp), 1) AS grp_avg,\n  DENSE_RANK() OVER (PARTITION BY grp ORDER BY score DESC) AS rnk\nFROM students\nORDER BY grp, rnk, name;\n",
+      },
+      {
+        name: "schema.sql",
+        content:
+          "CREATE TABLE students (\n  id SERIAL PRIMARY KEY,\n  grp TEXT NOT NULL,\n  name TEXT NOT NULL,\n  score INT NOT NULL\n);\n\nINSERT INTO students (grp, name, score) VALUES\n  ('ИУ7-21', 'Алиса', 95),\n  ('ИУ7-21', 'Боб', 82),\n  ('ИУ7-21', 'Вера', 95),\n  ('ИУ7-22', 'Глеб', 78),\n  ('ИУ7-22', 'Даша', 91);\n",
+      },
+    ],
+    active: "main.sql",
+    main: "main.sql",
+    stdin: "",
   },
 };
 const WS_KEY = (l: Language) => `tutor.sandbox.ws.${l}`;
@@ -82,7 +100,8 @@ export default function SandboxPage() {
   const [running, setRunning] = useState(false);
   const [ranFiles, setRanFiles] = useState<string | null>(null);
   const [ms, setMs] = useState<number | null>(null);
-  const [panel, setPanel] = useState<"out" | "in" | "ask">("out");
+  const [liveSchema, setLiveSchema] = useState<SqlTableSchema[] | null>(null);
+  const [panel, setPanel] = useState<"out" | "in" | "schema" | "ask">("out");
   const [naming, setNaming] = useState<string | null>(null);
   const [savedOpen, setSavedOpen] = useState(false);
   const [saved, setSaved] = useState<Saved[]>([]);
@@ -101,12 +120,15 @@ export default function SandboxPage() {
       const raw = new URLSearchParams(window.location.search).has("incoming") ? localStorage.getItem(SANDBOX_INCOMING) : null;
       if (raw) {
         const v = JSON.parse(raw) as { language: Language; code: string };
-        lang = v.language === "javascript" ? "javascript" : "python";
+        lang = v.language === "javascript" || v.language === "sql" ? v.language : "python";
         const name = `main${EXT[lang]}`;
         ws0 = { files: [{ name, content: v.code }], active: name, main: name, stdin: "" };
         localStorage.removeItem(SANDBOX_INCOMING);
         window.history.replaceState(null, "", "/sandbox");
-      } else if (localStorage.getItem(LANG_KEY) === "javascript") lang = "javascript";
+      } else {
+        const savedLang = localStorage.getItem(LANG_KEY);
+        if (savedLang === "javascript" || savedLang === "sql") lang = savedLang;
+      }
     } catch {}
     setLanguage(lang);
     setWs(ws0 ?? loadWs(lang));
@@ -136,10 +158,18 @@ export default function SandboxPage() {
     setWs(loadWs(l));
     setResult(null);
     setLive("");
+    setLiveSchema(null);
+    if (l === "sql" && panel === "in") setPanel("schema");
+    else if (l !== "sql" && panel === "schema") setPanel("out");
     try {
       localStorage.setItem(LANG_KEY, l);
     } catch {}
   };
+
+  const sqlSchema = useMemo(
+    () => (language === "sql" ? buildCodeMirrorSqlSchema(ws.files, liveSchema) : undefined),
+    [language, ws.files, liveSchema],
+  );
 
   const run = useCallback(async () => {
     if (running) return;
@@ -152,6 +182,7 @@ export default function SandboxPage() {
     const r = await runSandbox({ language, files: ws.files, main: ws.main, stdin: ws.stdin, onOutput: (s) => setLive((x) => x + s) });
     setMs(Math.round(performance.now() - t));
     setResult(r);
+    if (language === "sql" && r.schema) setLiveSchema(r.schema);
     setRanFiles(snapshot);
     setRunning(false);
   }, [running, ws, language]);
@@ -246,7 +277,7 @@ export default function SandboxPage() {
         busy={running}
         status={
           <>
-            <StatusItem>{language === "python" ? "Python (Pyodide)" : "JavaScript"}</StatusItem>
+            <StatusItem>{language === "python" ? "Python (Pyodide)" : language === "sql" ? "SQL (PostgreSQL)" : "JavaScript"}</StatusItem>
             <StatusItem>
               {ws.files.length} {ws.files.length === 1 ? "файл" : ws.files.length < 5 ? "файла" : "файлов"}
             </StatusItem>
@@ -268,7 +299,7 @@ export default function SandboxPage() {
         />
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <h1 className="mr-2 text-[22px] leading-tight font-normal text-bright">Песочница</h1>
-          <div className="w-52">
+          <div className="w-72">
             <Segmented
               label="Язык"
               value={language}
@@ -277,6 +308,7 @@ export default function SandboxPage() {
                 [
                   ["python", "Python"],
                   ["javascript", "JavaScript"],
+                  ["sql", "SQL"],
                 ] as const
               }
             />
@@ -369,6 +401,7 @@ export default function SandboxPage() {
                 value={file.content}
                 onChange={edit}
                 language={language}
+                sqlSchema={sqlSchema}
                 fill
                 errorLine={errorHere}
                 errorMessage={result?.error?.split("\n").filter(Boolean).at(-1)}
@@ -376,18 +409,27 @@ export default function SandboxPage() {
             </div>
             <p className="mt-1.5 hidden text-xs text-muted sm:block">
               <Kbd>Ctrl+Enter</Kbd> запустить · <Kbd>Ctrl+S</Kbd> сохранить · <Kbd>Ctrl+F</Kbd> поиск · <Kbd>Ctrl+/</Kbd> комментарий ·{" "}
-              {language === "python" ? "import других файлов, numpy и matplotlib подгружаются сами" : 'require("./файл") для других файлов'}
+              {language === "python"
+                ? "import других файлов, numpy и matplotlib подгружаются сами"
+                : language === "sql"
+                  ? "PostgreSQL: \\i файл.sql подключает другой файл"
+                  : 'require("./файл") для других файлов'}
             </p>
           </div>
 
           <div className="flex min-w-0 flex-col">
             <div className="flex gap-4 border-b border-border" role="tablist">
-              {(
-                [
-                  ["out", "Вывод"],
-                  ["in", "Ввод"],
-                  ["ask", "Спросить репетитора"],
-                ] as const
+              {(language === "sql"
+                ? ([
+                    ["out", "Вывод"],
+                    ["schema", "Схема БД"],
+                    ["ask", "Спросить репетитора"],
+                  ] as const)
+                : ([
+                    ["out", "Вывод"],
+                    ["in", "Ввод"],
+                    ["ask", "Спросить репетитора"],
+                  ] as const)
               ).map(([k, label]) => (
                 <button
                   key={k}
@@ -399,6 +441,7 @@ export default function SandboxPage() {
                   {label}
                   {k === "out" && result?.error && <span className="size-1.5 rounded-full bg-bad" />}
                   {k === "in" && ws.stdin.trim() && <span className="text-xs text-muted">{ws.stdin.split("\n").length}</span>}
+                  {k === "schema" && liveSchema && liveSchema.length > 0 && <span className="text-xs text-muted tabular-nums">{liveSchema.length}</span>}
                 </button>
               ))}
             </div>
@@ -412,7 +455,12 @@ export default function SandboxPage() {
                     <pre className="font-mono text-[13px] whitespace-pre-wrap">{output}</pre>
                     {running && (
                       <span className="mt-1 flex items-center gap-2 text-sm text-muted">
-                        <Dots /> {language === "python" && !output ? "Запускаю (первый запуск Python — несколько секунд)…" : "Выполняется…"}
+                        <Dots />{" "}
+                        {language === "python" && !output
+                          ? "Запускаю (первый запуск Python — несколько секунд)…"
+                          : language === "sql" && !output
+                            ? "Запускаю PostgreSQL (первый запуск — пару секунд)…"
+                            : "Выполняется…"}
                       </span>
                     )}
                     {result?.images?.map((src, i) => (
@@ -436,6 +484,53 @@ export default function SandboxPage() {
                     )}
                     {result && !result.error && !result.stdout && !result.images?.length && <p className="text-sm text-muted">Выполнено без вывода.</p>}
                   </>
+                )}
+              </div>
+            )}
+
+            {panel === "schema" && language === "sql" && (
+              <div className="mt-2 h-[56dvh] min-h-72 space-y-3 overflow-auto rounded-sm border border-border bg-surface px-3 py-2.5">
+                {liveSchema === null ? (
+                  <div className="space-y-2.5 text-sm text-muted">
+                    <p>Нажми «Запустить», чтобы PostgreSQL выполнил DDL и показал все таблицы, типы столбцов, PK и внешние ключи.</p>
+                    <p className="text-xs">Автодополнение имён таблиц и столбцов из CREATE TABLE в редакторе работает уже сейчас.</p>
+                    <Button small variant="primary" onClick={run} disabled={running}>
+                      <Icon name="play" /> Запустить
+                    </Button>
+                  </div>
+                ) : liveSchema.length === 0 ? (
+                  <p className="text-sm text-muted">В схеме public пока нет таблиц или представлений. Создай таблицу через CREATE TABLE и запусти снова.</p>
+                ) : (
+                  liveSchema.map((t) => (
+                    <div key={t.name} className="overflow-hidden rounded-sm border border-border bg-bg">
+                      <div className="flex items-center gap-2 border-b border-border bg-surface-2 px-2.5 py-1.5">
+                        <span className="font-mono text-[13px] font-medium text-bright">{t.name}</span>
+                        <Badge>{t.kind === "view" ? "VIEW" : t.kind === "matview" ? "MATVIEW" : "TABLE"}</Badge>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const snippet = `\nSELECT * FROM ${t.name} LIMIT 20;\n`;
+                            edit(file.content.trimEnd() + "\n" + snippet);
+                          }}
+                          className="ml-auto rounded-sm px-1.5 py-0.5 text-xs text-muted hover:bg-surface hover:text-accent"
+                          title="Добавить SELECT * FROM в конец текущего файла"
+                        >
+                          + SELECT
+                        </button>
+                      </div>
+                      <ul className="divide-y divide-border/60 text-xs">
+                        {t.columns.map((c) => (
+                          <li key={c.name} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-2.5 py-1">
+                            <span className="font-mono text-text">{c.name}</span>
+                            <span className="font-mono text-muted">{c.type}</span>
+                            {c.pk && <Badge tone="accent">PK</Badge>}
+                            {c.fk && <Badge>FK → {c.fk}</Badge>}
+                            {c.notNull && !c.pk && <span className="text-[11px] text-muted">NOT NULL</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))
                 )}
               </div>
             )}
@@ -519,7 +614,7 @@ export default function SandboxPage() {
                   <button onClick={() => open(s)} className="flex min-w-0 flex-1 items-center gap-2 text-left hover:text-accent">
                     <span className="truncate text-bright">{s.title}</span>
                     <span className="shrink-0 text-xs text-muted">
-                      {s.language === "python" ? "Python" : "JavaScript"} · {s.files.length} ф. · {formatDate(s.savedAt)}
+                      {LANGUAGE_LABEL[s.language] ?? s.language} · {s.files.length} ф. · {formatDate(s.savedAt)}
                     </span>
                   </button>
                   <button onClick={() => forget(s)} aria-label={`Удалить ${s.title}`} className="grid size-6 place-items-center rounded-sm text-muted opacity-60 group-hover:opacity-100 hover:text-bad">

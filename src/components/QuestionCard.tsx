@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { parsonsLines, seededShuffle } from "@/lib/grading";
 import { runCode, type RunOutcome } from "@/lib/runner";
-import { KIND_LABEL, PURPOSE_LABEL, type AnswerPayload, type Outcome, type Question, type TranscriptItem } from "@/lib/types";
+import { KIND_LABEL, LANGUAGE_LABEL, PURPOSE_LABEL, type AnswerPayload, type Outcome, type Question, type TranscriptItem } from "@/lib/types";
 import { openInSandbox } from "@/lib/sandbox";
 import { CodeEditor } from "./CodeEditor";
 import { EditorFrame, toolButton } from "./EditorTools";
@@ -343,7 +343,7 @@ export function ActiveQuestion({
           <EditorFrame
             full={full}
             onFull={setFull}
-            title={<span className="font-mono">{q.language === "python" ? "Python" : "JavaScript"}</span>}
+            title={<span className="font-mono">{q.language ? LANGUAGE_LABEL[q.language] : "Код"}</span>}
             actions={
               <>
                 {code !== (q.code ?? "") && (

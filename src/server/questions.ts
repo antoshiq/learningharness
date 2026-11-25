@@ -14,7 +14,7 @@ export const QUESTION_FORMAT = `Ответь только JSON-массивом 
 - свободный ответ: {"kind":"free","prompt":"…","reference_answer":"эталон в 1–3 предложения","explanation":"…"}
 - предсказать вывод программы: {"kind":"predict_output","language":"python","prompt":"Что напечатает программа?","code":"print(…)","explanation":"…"}
 Можно добавить "node_key", если вопрос проверяет конкретную идею плана.
-Правила: prompt не содержит ответа; у choice 3–5 правдоподобных вариантов и ровно один верный, correct_option — индекс с нуля; predict_output только для python или javascript, программа детерминированная, короткая и что-то печатает; формулы в $...$, код в Markdown-блоках.`;
+Правила: prompt не содержит ответа; у choice 3–5 правдоподобных вариантов и ровно один верный, correct_option — индекс с нуля; predict_output только для python, javascript или sql (PostgreSQL), программа детерминированная, короткая и что-то печатает (для sql — с ORDER BY); формулы в $...$, код в Markdown-блоках.`;
 
 function arrayIn(text: string): unknown[] {
   const start = text.indexOf("[");
@@ -55,7 +55,7 @@ export function parseQuestions(text: string, purpose: Purpose, nodeKeys?: Set<st
       if (!ref) continue;
       out.push({ ...base, kind: "free", reference_answer: ref });
     } else if (o.kind === "predict_output") {
-      const language = o.language === "python" || o.language === "javascript" ? (o.language as Language) : null;
+      const language = o.language === "python" || o.language === "javascript" || o.language === "sql" ? (o.language as Language) : null;
       const code = str(o.code, 4000);
       if (!language || !code) continue;
       out.push({ ...base, kind: "predict_output", language, code });

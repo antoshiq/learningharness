@@ -32,7 +32,8 @@ export default function LoginPage() {
             <Logo size={32} />
             <h1 className="mt-3 text-[22px] leading-tight font-normal text-bright">Репетитор</h1>
             <p className="mt-1.5 text-sm text-muted">
-              Пароль показан в окне запуска на компьютере, там, где открыт <code className="rounded-sm bg-code px-1 py-px font-mono text-xs">start-lan.cmd</code>.
+              Пароль показан в окне запуска на компьютере, там, где открыт <code className="rounded-sm bg-code px-1 py-px font-mono text-xs">start-lan.sh</code> /{" "}
+              <code className="rounded-sm bg-code px-1 py-px font-mono text-xs">start-lan.cmd</code>.
             </p>
           </div>
           <input

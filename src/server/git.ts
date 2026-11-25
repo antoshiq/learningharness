@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { StreamEvent } from "@/lib/types";
-import { DATA_DIR } from "./paths";
+import { DATA_DIR, expandUserPath } from "./paths";
 
 const GITHUB = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:\/(?:tree|blob)\/([\w./-]+?))?\/?(?:[?#].*)?$/i;
 const SAFE = /^[\w.-]+$/;
@@ -21,7 +21,15 @@ function git(args: string[], cwd?: string, timeout = 120_000): Promise<string> {
       (err, stdout, stderr) => {
         if (err) {
           const msg = (stderr || err.message).trim().split("\n").slice(-3).join(" ");
-          if ((err as NodeJS.ErrnoException).code === "ENOENT") reject(new Error("Не найден git. Установи Git для Windows: https://git-scm.com"));
+          if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+            reject(
+              new Error(
+                process.platform === "win32"
+                  ? "Не найден git. Установи Git для Windows: https://git-scm.com"
+                  : "Не найден git. Установи его (например, sudo apt install git) или с https://git-scm.com",
+              ),
+            );
+          }
           else reject(new Error(msg));
         } else resolve(stdout);
       },
@@ -46,7 +54,7 @@ export const isGithubLink = (s: string) => parseGithub(s) !== null;
 export async function resolveRepo(input: string, emit?: (e: StreamEvent) => void): Promise<{ root: string; url: string | null; before: string | null }> {
   const gh = parseGithub(input);
   if (!gh) {
-    const p = path.resolve(input.trim().replace(/^"(.*)"$/, "$1"));
+    const p = expandUserPath(input);
     if (!fs.existsSync(p) || !fs.statSync(p).isDirectory()) throw new Error("Папка не найдена. Укажи путь к папке проекта или ссылку на GitHub.");
     return { root: fs.realpathSync(p), url: null, before: null };
   }

@@ -121,6 +121,47 @@ export function encodeGrayPng(gray: Uint8Array, width: number, height: number): 
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", zlib.deflateSync(raw, { level: 6 })), chunk("IEND", new Uint8Array())]);
 }
 
+/**
+ * Encode raw 1-, 3- or 4-channel pixels to a PNG, downscaling huge images so
+ * diagrams/scans sent to a vision model stay crisp yet compact.
+ */
+export function encodeRawImagePng(img: RawImage, maxSide = 1800): Buffer {
+  const { width: w, height: h, channels: ch, data } = img;
+  const outCh = ch === 1 ? 1 : ch === 4 ? 4 : 3;
+  const longer = Math.max(w, h);
+  const scale = longer > maxSide ? maxSide / longer : 1;
+  const W = Math.max(1, Math.round(w * scale));
+  const H = Math.max(1, Math.round(h * scale));
+  const stride = W * outCh;
+  const raw = Buffer.alloc((stride + 1) * H);
+
+  for (let y = 0; y < H; y++) {
+    const sy = scale === 1 ? y : Math.min(h - 1, Math.floor(y / scale));
+    const rowOff = y * (stride + 1);
+    raw[rowOff] = 0;
+    for (let x = 0; x < W; x++) {
+      const sx = scale === 1 ? x : Math.min(w - 1, Math.floor(x / scale));
+      const srcOff = (sy * w + sx) * ch;
+      const dstOff = rowOff + 1 + x * outCh;
+      if (outCh === 1) {
+        raw[dstOff] = data[srcOff];
+      } else {
+        raw[dstOff] = data[srcOff];
+        raw[dstOff + 1] = data[srcOff + 1] ?? data[srcOff];
+        raw[dstOff + 2] = data[srcOff + 2] ?? data[srcOff];
+        if (outCh === 4) raw[dstOff + 3] = data[srcOff + 3] ?? 255;
+      }
+    }
+  }
+
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(W, 0);
+  ihdr.writeUInt32BE(H, 4);
+  ihdr[8] = 8;
+  ihdr[9] = outCh === 1 ? 0 : outCh === 4 ? 6 : 2; // 0=grey, 2=RGB, 6=RGBA
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", zlib.deflateSync(raw, { level: 6 })), chunk("IEND", new Uint8Array())]);
+}
+
 // ---------------------------------------------------------------------------
 // Tesseract
 // ---------------------------------------------------------------------------
@@ -143,7 +184,10 @@ function langDir(): string {
     fs.mkdirSync(dir, { recursive: true });
     // From the project's node_modules: the bundler rewrites require.resolve paths on the server.
     const src = path.join(ROOT, "node_modules", "@tesseract.js-data", code, "4.0.0_best_int", `${code}.traineddata.gz`);
-    if (!fs.existsSync(src)) throw new Error(`Нет данных распознавания (${code}). Переустанови зависимости: install.cmd.`);
+    if (!fs.existsSync(src)) {
+      const hint = process.platform === "win32" ? "start.cmd install" : "./start.sh install";
+      throw new Error(`Нет данных распознавания (${code}). Переустанови зависимости: ${hint}.`);
+    }
     fs.copyFileSync(src, target);
   }
   return dir;

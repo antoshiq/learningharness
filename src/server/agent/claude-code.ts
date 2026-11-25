@@ -29,6 +29,7 @@ import {
 } from "../llm/types";
 import { DATA_DIR } from "../paths";
 import type { StreamEvent } from "@/lib/types";
+import { compactMessagesForLlm } from "./context";
 import { systemPrompt } from "./prompts";
 import { executeToolAsync, semesterBookIds, toolShapes } from "./tools";
 
@@ -254,7 +255,7 @@ async function attempt(sessionId: number, cc: { sessionId: string; sent: number 
   });
 
   const q = query({
-    prompt: renderPrompt(history, cc?.sent ?? 0),
+    prompt: renderPrompt(cc ? history : compactMessagesForLlm(history), cc?.sent ?? 0),
     options: {
       ...baseOptions(model, systemPrompt(session.kind, topic.kind, getTheoryDepth()) + ENV_NOTE),
       ...(cc ? { resume: cc.sessionId } : {}),

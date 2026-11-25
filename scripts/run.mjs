@@ -23,14 +23,17 @@ const url = `http://localhost:${port}`;
 const nextBin = path.join(root, "node_modules", "next", "dist", "bin", "next");
 
 if (!fs.existsSync(nextBin)) {
-  console.error("Зависимости не установлены. Запусти install.cmd.");
+  const hint = process.platform === "win32" ? "start.cmd install" : "./start.sh install";
+  console.error(`Зависимости не установлены. Запусти ${hint}.`);
   process.exit(1);
 }
 
 function openBrowser() {
   const [cmd, cmdArgs] =
     process.platform === "win32" ? ["cmd", ["/c", "start", "", url]] : process.platform === "darwin" ? ["open", [url]] : ["xdg-open", [url]];
-  spawn(cmd, cmdArgs, { stdio: "ignore", detached: true }).unref();
+  const child = spawn(cmd, cmdArgs, { stdio: "ignore", detached: true });
+  child.on("error", () => {});
+  child.unref();
 }
 
 function portBusy() {
@@ -68,6 +71,8 @@ if (await portBusy()) {
 
 const { copyPyodide } = await import("./copy-pyodide.mjs");
 copyPyodide();
+const { copyPglite } = await import("./copy-pglite.mjs");
+copyPglite();
 
 // A copy of the learning data before every start; restore it in Settings → Data.
 const { autoBackup } = await import("./backup.mjs");
@@ -130,7 +135,11 @@ console.log(`  На этом компьютере:  http://localhost:${port}`);
 if (lan) {
   for (const ip of lanAddresses()) console.log(`  С телефона (та же сеть Wi-Fi):  http://${ip}:${port}`);
   console.log(`  Пароль для входа:  ${env.TUTOR_LAN_PASSWORD}`);
-  console.log("  Если Windows спросит про брандмауэр — разреши доступ для частных сетей.");
+  if (process.platform === "win32") {
+    console.log("  Если Windows спросит про брандмауэр — разреши доступ для частных сетей.");
+  } else if (process.platform === "linux") {
+    console.log(`  Если с телефона не открывается, проверь фаервол (например: sudo ufw allow ${port}/tcp).`);
+  }
 }
 console.log("  Остановить: Ctrl+C");
 console.log("");

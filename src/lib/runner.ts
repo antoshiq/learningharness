@@ -2,6 +2,7 @@
 // takes a few seconds once); JavaScript gets a fresh worker per run.
 // Lessons use runCode (graded runs, serialized); the sandbox has its own Python
 // worker so a long experiment never blocks a lesson, and it can be stopped.
+import type { SqlTableSchema } from "./sql-schema";
 import type { Language, RunResult } from "./types";
 
 export interface ErrorAt {
@@ -16,6 +17,8 @@ export interface RunOutcome extends RunResult {
   errorAt?: ErrorAt | null;
   /** Sandbox: matplotlib figures as base64 PNG. */
   images?: string[];
+  /** Sandbox (SQL): live PostgreSQL tables/views in the public schema after the run. */
+  schema?: SqlTableSchema[];
   /** Sandbox: stopped by the learner. */
   stopped?: boolean;
 }
@@ -25,6 +28,7 @@ const SANDBOX_TIMEOUT_MS = 60_000;
 const LOAD_TIMEOUT_MS = 90_000;
 
 let pyWorker: Worker | null = null;
+let sqlWorker: Worker | null = null;
 let seq = 0;
 let queue: Promise<unknown> = Promise.resolve();
 
@@ -81,7 +85,15 @@ function runIn(
         return;
       }
       finish(
-        { ok: !!m.ok, stdout: m.stdout ?? "", error: m.error ?? null, infra: !!m.infra, errorAt: m.errorAt ?? null, images: m.images ?? [] },
+        {
+          ok: !!m.ok,
+          stdout: m.stdout ?? "",
+          error: m.error ?? null,
+          infra: !!m.infra,
+          errorAt: m.errorAt ?? null,
+          images: m.images ?? [],
+          schema: m.schema,
+        },
         !!m.infra,
       );
     };
@@ -104,6 +116,9 @@ export function runCode(language: Language, code: string, tests?: string): Promi
       r = await runIn(pyWorker, () => (pyWorker = null), true, { code, tests }, { timeout: RUN_TIMEOUT_MS });
       // Lessons run code and tests as one "<exec>": a line past the code is in the tests.
       if (r.errorAt && r.errorAt.line > code.split("\n").length) r.errorAt = null;
+    } else if (language === "sql") {
+      sqlWorker ??= new Worker("/sql-worker.js", { type: "module" });
+      r = await runIn(sqlWorker, () => (sqlWorker = null), true, { code, tests }, { timeout: RUN_TIMEOUT_MS });
     } else {
       r = await runIn(new Worker("/js-worker.js"), () => {}, false, { code, tests }, { timeout: RUN_TIMEOUT_MS });
     }
@@ -118,6 +133,7 @@ export function runCode(language: Language, code: string, tests?: string): Promi
 // ---------------------------------------------------------------------------
 
 let sandboxPy: Worker | null = null;
+let sandboxSql: Worker | null = null;
 let stopCurrent: (() => void) | null = null;
 
 export interface SandboxRun {
@@ -137,6 +153,10 @@ export async function runSandbox(r: SandboxRun): Promise<RunOutcome> {
     if (r.language === "python") {
       sandboxPy ??= new Worker("/py-worker.js", { type: "module" });
       return await runIn(sandboxPy, () => (sandboxPy = null), true, job, { timeout: SANDBOX_TIMEOUT_MS, onOutput: r.onOutput, register });
+    }
+    if (r.language === "sql") {
+      sandboxSql ??= new Worker("/sql-worker.js", { type: "module" });
+      return await runIn(sandboxSql, () => (sandboxSql = null), true, job, { timeout: SANDBOX_TIMEOUT_MS, onOutput: r.onOutput, register });
     }
     return await runIn(new Worker("/js-worker.js"), () => {}, false, job, { timeout: SANDBOX_TIMEOUT_MS, onOutput: r.onOutput, register });
   } finally {

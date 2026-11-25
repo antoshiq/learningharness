@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useMemo } from "react";
 import { javascript } from "@codemirror/lang-javascript";
 import { python } from "@codemirror/lang-python";
+import { PostgreSQL, sql } from "@codemirror/lang-sql";
 import { lintGutter, linter, type Diagnostic } from "@codemirror/lint";
 import type { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
@@ -39,6 +40,7 @@ export function CodeEditor({
   value,
   onChange,
   language,
+  sqlSchema,
   readOnly,
   minHeight = "120px",
   fill,
@@ -49,6 +51,8 @@ export function CodeEditor({
   value: string;
   onChange?: (v: string) => void;
   language?: Language;
+  /** Table -> column names map for SQL autocompletion (PostgreSQL). */
+  sqlSchema?: Record<string, string[]>;
   readOnly?: boolean;
   minHeight?: string;
   /** Take the full height of the parent (sandbox), instead of growing with the text. */
@@ -61,12 +65,20 @@ export function CodeEditor({
   const dark = useDark();
   const [prefs] = useEditorPrefs();
   const extensions = useMemo(() => {
-    const ext: Extension[] = [language === "python" ? python() : language === "javascript" ? javascript() : []];
+    const ext: Extension[] = [
+      language === "python"
+        ? python()
+        : language === "javascript"
+          ? javascript()
+          : language === "sql"
+            ? sql({ dialect: PostgreSQL, ...(sqlSchema ? { schema: sqlSchema } : {}) })
+            : [],
+    ];
     ext.push(EditorView.theme({ "&": { fontSize: `${prefs.fontSize}px` }, ".cm-content": { fontSize: `${prefs.fontSize}px` } }));
     if (prefs.wrap) ext.push(EditorView.lineWrapping);
     if (errorLine) ext.push(errorMarker(errorLine, errorMessage || "Ошибка в этой строке"));
     return ext;
-  }, [language, prefs.fontSize, prefs.wrap, errorLine, errorMessage]);
+  }, [language, sqlSchema, prefs.fontSize, prefs.wrap, errorLine, errorMessage]);
 
   return (
     <div className={cx("overflow-hidden rounded-sm border border-border focus-within:border-accent", fill && "h-full", className)}>

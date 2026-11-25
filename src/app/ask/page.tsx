@@ -43,7 +43,7 @@ export default function AskPage() {
               className={cx(inputClass, "font-mono text-[15px]")}
               value={repo}
               onChange={(e) => setRepo(e.target.value)}
-              placeholder="C:\Users\...\my-project или https://github.com/owner/repo"
+              placeholder="~/projects/my-project или https://github.com/owner/repo"
               spellCheck={false}
               autoCapitalize="off"
               autoCorrect="off"

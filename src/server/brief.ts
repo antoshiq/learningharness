@@ -9,7 +9,9 @@ import { thesisKey } from "@/lib/brief";
 import type { StreamEvent } from "@/lib/types";
 import { briefSystem, EXPAND_SYSTEM, type BriefDepth, type BriefKind } from "./brief-prompts";
 import { getDb, schema } from "./db";
+import { extractDocx, extractImageMaterial, extractIpynb, extractPptx, isDocxName, isImageName, isIpynbName, isPptxName, isZip } from "./documents";
 import { fetchUrlText, isPdf, pdfText } from "./extract";
+import { photoType } from "./vision";
 import { changesSince, headCommit, parseGithub, REPOS_DIR, resolveRepo } from "./git";
 import { chatAs } from "./llm";
 import { uploadText } from "./materials";
@@ -17,6 +19,7 @@ import { isSubtitleFile, youtubeId, youtubeTranscript } from "./youtube";
 import { isText } from "./llm/types";
 import { openScan, pickFiles, readChosen } from "./repo/pick";
 import { isSecretName, MAX_FILE_BYTES } from "./repo/scan";
+import { expandUserPath } from "./paths";
 
 /** Characters of source material the model may see, by reading time. */
 const BUDGET: Record<BriefDepth, number> = { 1: 24_000, 5: 60_000, 15: 120_000 };
@@ -24,8 +27,8 @@ const MAX_TOKENS: Record<BriefDepth, number> = { 1: 2_000, 5: 5_000, 15: 10_000 
 /** Files the model may add to the obvious ones when looking at a repository. */
 const PICK: Record<BriefDepth, number> = { 1: 6, 5: 12, 15: 22 };
 const MAX_UPLOAD_CHARS = 4_000_000;
-const MAX_PDF_FILE = 30 * 1024 * 1024;
-const DOC_EXT = /\.(pdf|md|markdown|txt|rst|adoc|html?|tex)$/i;
+const MAX_DOC_FILE = 50 * 1024 * 1024;
+const DOC_EXT = /\.(pdf|docx|pptx|ipynb|png|jpe?g|webp|md|markdown|txt|rst|adoc|html?|tex)$/i;
 
 export interface BriefInput {
   kind: BriefKind;
@@ -42,6 +45,8 @@ export interface BriefInput {
   uploads?: { name: string; content: string; base64?: boolean }[];
   /** kind = review: code pasted into the page */
   code?: string;
+  /** Skip vision model calls for embedded figures/scans in uploaded documents. */
+  skipVision?: boolean;
 }
 
 interface Material {
@@ -60,23 +65,28 @@ interface Material {
   commit?: string | null;
 }
 
-async function fileText(name: string, buf: Buffer): Promise<string> {
-  if (isPdf(buf)) return (await pdfText(buf)).text;
-  if (buf.subarray(0, 8000).includes(0)) throw new Error(`${name} не текстовый файл и не PDF.`);
-  return buf.toString("utf8");
+async function fileText(name: string, buf: Buffer, opts: { useVision?: boolean; onProgress?: (text: string) => void } = {}): Promise<string> {
+  if (isPdf(buf)) return (await pdfText(buf, opts)).text;
+  if (isDocxName(name) && isZip(buf)) return extractDocx(buf, opts);
+  if (isPptxName(name) && isZip(buf)) return extractPptx(buf, opts);
+  if (isImageName(name) || photoType(buf)) return extractImageMaterial(buf, name, opts);
+  if (buf.subarray(0, 8000).includes(0)) throw new Error(`${name}: поддерживаются текст/код, PDF, .docx, .pptx, .ipynb и изображения.`);
+  const text = buf.toString("utf8");
+  if (isIpynbName(name)) return extractIpynb(text);
+  return text;
 }
 
 /** Reading files the learner named; refuse secrets, binaries and folders. */
-async function readNamedFile(abs: string): Promise<{ name: string; content: string }> {
-  const p = path.resolve(abs.trim().replace(/^"(.*)"$/, "$1"));
+async function readNamedFile(abs: string, opts: { useVision?: boolean; onProgress?: (text: string) => void } = {}): Promise<{ name: string; content: string }> {
+  const p = expandUserPath(abs);
   const name = path.basename(p);
   if (!fs.existsSync(p)) throw new Error(`Файл не найден: ${p}`);
   const st = fs.statSync(p);
   if (st.isDirectory()) throw new Error(`${p} — это папка. Для папки проекта выбери «Репозиторий».`);
   if (isSecretName(name)) throw new Error(`${name} похож на файл с секретами и не отправляется модели.`);
-  const limit = /\.pdf$/i.test(name) ? MAX_PDF_FILE : MAX_FILE_BYTES;
+  const limit = /\.(pdf|docx|pptx|png|jpe?g|webp)$/i.test(name) ? MAX_DOC_FILE : MAX_FILE_BYTES;
   if (st.size > limit) throw new Error(`${name} слишком большой (больше ${Math.round(limit / 1_000_000)} МБ).`);
-  return { name, content: await fileText(name, fs.readFileSync(p)) };
+  return { name, content: await fileText(name, fs.readFileSync(p), opts) };
 }
 
 /** Put texts into the prompt until the budget runs out; the rest is cut and marked. */
@@ -100,8 +110,14 @@ async function fromFiles(input: BriefInput, emit: (e: StreamEvent) => void): Pro
   if (!named.length && !input.uploads?.length) throw new Error("Добавь хотя бы один файл");
   if ([...named, ...(input.uploads ?? []).map((u) => u.name)].some((n) => /\.pdf$/i.test(n))) emit({ type: "status", text: "Извлекаю текст из PDF…" });
   const files: { name: string; content: string }[] = [];
-  for (const p of named) files.push(await readNamedFile(p));
-  for (const u of input.uploads ?? []) files.push(await uploadText(u));
+  const docOpts = (label: string) => ({
+    useVision: !input.skipVision,
+    onProgress: (msg: string) => emit({ type: "status", text: `${label}: ${msg}` }),
+  });
+  for (const p of named) files.push(await readNamedFile(p, docOpts(path.basename(p))));
+  for (const u of input.uploads ?? []) {
+    files.push(await uploadText(u, { skipVision: input.skipVision, onProgress: (msg) => emit({ type: "status", text: `${u.name}: ${msg}` }) }));
+  }
   if (files.some((f) => f.content.includes("\u0000"))) throw new Error("Среди файлов есть не текстовый");
   if (files.reduce((n, f) => n + f.content.length, 0) > MAX_UPLOAD_CHARS) throw new Error("Слишком много текста: выбери меньше файлов");
   const { text, used } = pack(files, BUDGET[input.depth]);
@@ -229,7 +245,9 @@ export function pastedName(code: string, taken: string[]): string {
 async function fromReview(input: BriefInput, emit: (e: StreamEvent) => void): Promise<Material> {
   const files: { name: string; content: string }[] = [];
   if (input.uploads?.some((u) => u.base64)) emit({ type: "status", text: "Читаю файлы…" });
-  for (const u of input.uploads ?? []) files.push(await uploadText(u));
+  for (const u of input.uploads ?? []) {
+    files.push(await uploadText(u, { skipVision: input.skipVision, onProgress: (msg) => emit({ type: "status", text: `${u.name}: ${msg}` }) }));
+  }
   const pasted = (input.code ?? "").trim();
   if (pasted) files.unshift({ name: pastedName(pasted, files.map((f) => f.name)), content: pasted });
   if (!files.length) throw new Error("Вставь код или приложи файлы");
@@ -254,7 +272,9 @@ async function fromTopic(input: BriefInput, emit: (e: StreamEvent) => void): Pro
 
   if (uploads.some((u) => u.base64)) emit({ type: "status", text: "Извлекаю текст из файлов…" });
   const files: { name: string; content: string }[] = [];
-  for (const u of uploads) files.push(await uploadText(u));
+  for (const u of uploads) {
+    files.push(await uploadText(u, { skipVision: input.skipVision, onProgress: (msg) => emit({ type: "status", text: `${u.name}: ${msg}` }) }));
+  }
   if (files.reduce((n, f) => n + f.content.length, 0) > MAX_UPLOAD_CHARS) throw new Error("Слишком много текста: выбери меньше файлов");
   const { text, used } = pack(files, BUDGET[input.depth]);
   const title = t || files[0].name.replace(/\.[^.]+$/, "");

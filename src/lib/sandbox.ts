@@ -9,6 +9,7 @@ export function sandboxLanguage(lang: string | undefined): Language | null {
   const l = lang.toLowerCase();
   if (l === "python" || l === "py" || l === "python3") return "python";
   if (l === "javascript" || l === "js" || l === "node" || l === "mjs") return "javascript";
+  if (l === "sql" || l === "postgresql" || l === "postgres" || l === "psql" || l === "pgsql" || l === "plpgsql") return "sql";
   return null;
 }
 
